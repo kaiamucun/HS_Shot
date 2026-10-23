@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 
 enum EditorTool: String, CaseIterable, Identifiable {
     case select, arrow, line, rectangle, ellipse, pen, highlight, text, number, pixelate, redact, crop
@@ -256,7 +257,7 @@ final class EditorDocument: ObservableObject {
     let base: CGImage
     @Published private(set) var selectedAnnotationID: UUID?
     @Published var tool: EditorTool = .select
-    @Published var color: NSColor = NSColor(srgbRed: 0.8, green: 0.96, blue: 0.3, alpha: 1)
+    @Published var color: NSColor = NSColor(ShotTheme.accent)
     @Published var lineWidth: CGFloat = 5
     @Published var text = "テキスト"
     @Published private(set) var state = EditorSnapshot()
@@ -371,7 +372,7 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
     }
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
-        NSColor(srgbRed: 0.035, green: 0.048, blue: 0.075, alpha: 1).setFill()
+        NSColor(ShotTheme.canvas).setFill()
         bounds.fill()
         let rect = imageRect
         let scale = rect.width / CGFloat(document.base.width)
@@ -383,7 +384,7 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         for y in stride(from: Int(backdrop.minY), through: Int(backdrop.maxY), by: 12) {
             for x in stride(from: Int(backdrop.minX), through: Int(backdrop.maxX), by: 12) {
                 let light = ((x - Int(backdrop.minX)) / 12 + (y - Int(backdrop.minY)) / 12) % 2 == 0
-                context.setFillColor(CGColor(gray: light ? 0.18 : 0.14, alpha: 1))
+                context.setFillColor(CGColor(gray: light ? 0.98 : 0.93, alpha: 1))
                 context.fill(CGRect(x: x, y: y, width: 12, height: 12))
             }
         }
@@ -401,19 +402,19 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         if let draft, draft.tool != .crop { EditorRenderer.draw(draft, in: context, base: document.base) }
         if var selected = document.selectedAnnotation, document.tool == .select {
             if draggedAnnotation != nil { selected.points = selected.points.map { CGPoint(x: $0.x + dragOffset.x, y: $0.y + dragOffset.y) } }
-            context.setStrokeColor(NSColor(srgbRed: 0.8, green: 0.96, blue: 0.3, alpha: 1).cgColor)
+            context.setStrokeColor(NSColor(ShotTheme.accent).cgColor)
             context.setLineWidth(1.5 / scale)
             context.setLineDash(phase: 0, lengths: [5 / scale, 3 / scale])
             context.stroke(selected.selectionBounds.insetBy(dx: -5 / scale, dy: -5 / scale))
             context.setLineDash(phase: 0, lengths: [])
         }
         if let crop = draft?.tool == .crop ? draft?.rect : document.state.crop {
-            context.setFillColor(NSColor.black.withAlphaComponent(0.55).cgColor)
+            context.setFillColor(NSColor(ShotTheme.text).withAlphaComponent(0.3).cgColor)
             let full = CGRect(x: 0, y: 0, width: document.base.width, height: document.base.height)
             context.addRect(full)
             context.addRect(crop)
             context.drawPath(using: .eoFill)
-            context.setStrokeColor(NSColor(srgbRed: 0.8, green: 0.96, blue: 0.3, alpha: 1).cgColor)
+            context.setStrokeColor(NSColor(ShotTheme.accent).cgColor)
             context.setLineWidth(2 / scale)
             context.setLineDash(phase: 0, lengths: [6 / scale, 4 / scale])
             context.stroke(crop)
@@ -500,8 +501,9 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         field.stringValue = document.text
         field.placeholderString = "テキストを入力"
         field.font = .systemFont(ofSize: max(14, (document.lineWidth * 5 + 10) * scale), weight: .bold)
-        field.textColor = document.color
-        field.backgroundColor = NSColor(srgbRed: 0.06, green: 0.08, blue: 0.12, alpha: 0.96)
+        field.textColor = NSColor(ShotTheme.text)
+        field.backgroundColor = NSColor(ShotTheme.panel)
+        field.drawsBackground = true
         field.focusRingType = .none
         field.isBezeled = true
         field.bezelStyle = .roundedBezel

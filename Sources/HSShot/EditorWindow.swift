@@ -33,13 +33,13 @@ private final class EditorWindowController: NSWindowController, NSWindowDelegate
         window.title = "\(title) — HS Shot"
         window.minSize = NSSize(width: 900, height: 600)
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = NSColor(srgbRed: 0.055, green: 0.07, blue: 0.11, alpha: 1)
+        window.backgroundColor = NSColor(ShotTheme.background)
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
         window.delegate = self
         window.contentView = NSHostingView(rootView: EditorWorkspace(document: document, imageTitle: title, onSave: onSave))
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: .aqua)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func windowWillClose(_ notification: Notification) {
@@ -47,13 +47,6 @@ private final class EditorWindowController: NSWindowController, NSWindowDelegate
         onClose = nil
         callback?()
     }
-}
-
-private enum EditorStyle {
-    static let background = Color(red: 0.055, green: 0.07, blue: 0.11)
-    static let surface = Color(red: 0.08, green: 0.10, blue: 0.15)
-    static let accent = Color(red: 0.8, green: 0.96, blue: 0.3)
-    static let muted = Color(red: 0.54, green: 0.60, blue: 0.69)
 }
 
 @MainActor
@@ -66,7 +59,7 @@ private struct EditorWorkspace: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Rectangle().fill(.white.opacity(0.07)).frame(height: 1)
+            Rectangle().fill(ShotTheme.border).frame(height: 1)
             HStack(spacing: 0) {
                 toolRail
                 CanvasHost(document: document)
@@ -75,10 +68,10 @@ private struct EditorWorkspace: View {
             }
             footer
         }
-        .background(EditorStyle.background)
-        .foregroundStyle(.white)
-        .tint(EditorStyle.accent)
-        .preferredColorScheme(.dark)
+        .background(ShotTheme.background)
+        .foregroundStyle(ShotTheme.text)
+        .tint(ShotTheme.accent)
+        .preferredColorScheme(.light)
         .background {
             Group {
                 Button("元に戻す", action: document.undo).keyboardShortcut("z", modifiers: .command).disabled(!document.canUndo)
@@ -89,10 +82,10 @@ private struct EditorWorkspace: View {
 
     private var header: some View {
         HStack(spacing: 18) {
-            Image(systemName: "viewfinder").font(.system(size: 22, weight: .semibold)).foregroundStyle(EditorStyle.accent)
+            Image(systemName: "viewfinder").font(.system(size: 22, weight: .semibold)).foregroundStyle(ShotTheme.accent)
             VStack(alignment: .leading, spacing: 3) {
                 Text("画像を仕上げる").font(.system(size: 16, weight: .semibold))
-                Text(imageTitle).font(.system(size: 11)).foregroundStyle(EditorStyle.muted).lineLimit(1)
+                Text(imageTitle).font(.system(size: 11)).foregroundStyle(ShotTheme.muted).lineLimit(1)
             }
             Spacer()
             HStack(spacing: 4) {
@@ -101,7 +94,7 @@ private struct EditorWorkspace: View {
                 Button(action: document.redo) { Image(systemName: "arrow.uturn.forward").frame(width: 30, height: 28) }
                     .help("やり直す ⇧⌘Z").disabled(!document.canRedo)
             }.buttonStyle(.borderless)
-            Rectangle().fill(.white.opacity(0.1)).frame(width: 1, height: 24)
+            Rectangle().fill(ShotTheme.border).frame(width: 1, height: 24)
             Button(action: copyImage) { Label("コピー", systemImage: "doc.on.doc") }
                 .keyboardShortcut("c", modifiers: .command)
             Button(action: exportImage) { Label("書き出す", systemImage: "square.and.arrow.up") }
@@ -109,9 +102,9 @@ private struct EditorWorkspace: View {
             Button(action: saveToLibrary) {
                 Label("ライブラリに保存", systemImage: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(EditorStyle.background)
+                    .foregroundStyle(ShotTheme.onAccent)
                     .padding(.horizontal, 13).padding(.vertical, 8)
-                    .background(EditorStyle.accent, in: RoundedRectangle(cornerRadius: 7))
+                    .background(ShotTheme.accent, in: RoundedRectangle(cornerRadius: 7))
             }
                 .keyboardShortcut("s", modifiers: .command)
                 .buttonStyle(.plain)
@@ -120,6 +113,7 @@ private struct EditorWorkspace: View {
         .controlSize(.regular)
         .padding(.horizontal, 22)
         .padding(.vertical, 17)
+        .background(ShotTheme.panel)
     }
 
     private var toolRail: some View {
@@ -132,8 +126,8 @@ private struct EditorWorkspace: View {
                     Image(systemName: tool.symbol)
                         .font(.system(size: 17, weight: .medium))
                         .frame(width: 42, height: 35)
-                        .foregroundStyle(document.tool == tool ? EditorStyle.background : Color.white.opacity(0.75))
-                        .background(document.tool == tool ? EditorStyle.accent : .clear, in: RoundedRectangle(cornerRadius: 10))
+                        .foregroundStyle(document.tool == tool ? ShotTheme.onAccent : ShotTheme.muted)
+                        .background(document.tool == tool ? ShotTheme.accent : .clear, in: RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
                 .help(tool.title + (tool.keyHint.isEmpty ? "" : " (\(tool.keyHint))"))
@@ -144,16 +138,16 @@ private struct EditorWorkspace: View {
         .padding(.horizontal, 12)
         .padding(.top, 18)
         .frame(width: 66)
-        .background(EditorStyle.surface)
+        .background(ShotTheme.sidebar)
     }
 
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 23) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("編集ツール").font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(EditorStyle.muted)
+                Text("編集ツール").font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(ShotTheme.muted)
                 Label(document.tool.title, systemImage: document.tool.symbol).font(.system(size: 18, weight: .semibold))
             }
-            Divider().overlay(.white.opacity(0.06))
+            Divider().overlay(ShotTheme.border)
             VStack(alignment: .leading, spacing: 12) {
                 inspectorLabel("スタイル")
                 ColorPicker("カラー", selection: Binding(get: { Color(nsColor: document.color) }, set: { document.color = NSColor($0) }), supportsOpacity: false)
@@ -162,21 +156,22 @@ private struct EditorWorkspace: View {
                     ForEach(Array(palette.enumerated()), id: \.offset) { _, color in
                         Button { document.color = color } label: {
                             Circle().fill(Color(nsColor: color)).frame(width: 21, height: 21)
-                                .overlay(Circle().stroke(.white.opacity(document.color.isEqual(color) ? 0.85 : 0), lineWidth: 2).padding(-3))
+                                .overlay(Circle().stroke(ShotTheme.border, lineWidth: 1))
+                                .overlay(Circle().stroke(document.color.isEqual(color) ? ShotTheme.accent : .clear, lineWidth: 2).padding(-3))
                         }.buttonStyle(.plain).accessibilityLabel("注釈カラー")
                     }
                 }
                 HStack {
                     Text("線の太さ").font(.system(size: 12))
                     Spacer()
-                    Text("\(Int(document.lineWidth)) px").font(.system(size: 11, design: .monospaced)).foregroundStyle(EditorStyle.muted)
+                    Text("\(Int(document.lineWidth)) px").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted)
                 }.padding(.top, 8)
                 Slider(value: $document.lineWidth, in: 1...20, step: 1)
             }
             if document.tool == .select {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("クリックで選択、ドラッグで移動。Delete で削除できます。")
-                        .font(.system(size: 11)).foregroundStyle(EditorStyle.muted)
+                        .font(.system(size: 11)).foregroundStyle(ShotTheme.muted)
                     if document.selectedAnnotationID != nil {
                         Button(role: .destructive, action: document.removeSelected) {
                             Label("選択した注釈を削除", systemImage: "trash")
@@ -189,14 +184,14 @@ private struct EditorWorkspace: View {
                     inspectorLabel("テキスト")
                     TextField("配置するテキスト", text: $document.text, axis: .vertical)
                         .textFieldStyle(.roundedBorder).lineLimit(2...4)
-                    Text("画像をクリック → 入力 → Enter で確定").font(.system(size: 10)).foregroundStyle(EditorStyle.muted)
+                    Text("画像をクリック → 入力 → Enter で確定").font(.system(size: 10)).foregroundStyle(ShotTheme.muted)
                 }
             }
             if document.tool == .redact || document.tool == .pixelate {
                 Text(document.tool == .redact ? "秘匿範囲は不透明な黒で塗りつぶします。共有前に出力画像をご確認ください。" : "ピクセル化は装飾用です。機密情報には「塗りつぶし秘匿」を使用してください。")
-                    .font(.system(size: 11)).foregroundStyle(EditorStyle.muted).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 11)).foregroundStyle(ShotTheme.muted).fixedSize(horizontal: false, vertical: true)
             }
-            Divider().overlay(.white.opacity(0.06))
+            Divider().overlay(ShotTheme.border)
             VStack(alignment: .leading, spacing: 13) {
                 inspectorLabel("背景と余白")
                 Picker("背景", selection: Binding(get: { document.state.background }, set: { value in document.change { $0.background = value } })) {
@@ -221,22 +216,22 @@ private struct EditorWorkspace: View {
                     Text("JPEG").tag(true)
                 }.pickerStyle(.segmented).labelsHidden()
                 Text(exportJPEG ? "JPEG・高画質 / 透明部分は白" : "PNG・ロスレス / 透明背景に対応")
-                    .font(.system(size: 10)).foregroundStyle(EditorStyle.muted)
+                    .font(.system(size: 10)).foregroundStyle(ShotTheme.muted)
                 HStack {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                     Text(document.dimensions).fontDesign(.monospaced)
-                }.font(.system(size: 11)).foregroundStyle(EditorStyle.muted)
+                }.font(.system(size: 11)).foregroundStyle(ShotTheme.muted)
             }
         }
         .padding(22)
         .frame(width: 234)
         .frame(maxHeight: .infinity)
-        .background(EditorStyle.surface)
+        .background(ShotTheme.panel)
     }
 
     private var footer: some View {
         HStack(spacing: 9) {
-            Circle().fill(EditorStyle.accent).frame(width: 5, height: 5)
+            Circle().fill(ShotTheme.accent).frame(width: 5, height: 5)
             Text(document.status).lineLimit(1)
             Spacer()
             Text("\(document.state.annotations.count) 個の注釈")
@@ -244,15 +239,17 @@ private struct EditorWorkspace: View {
             Text("原本は保持されます")
         }
         .font(.system(size: 10))
-        .foregroundStyle(EditorStyle.muted)
+        .foregroundStyle(ShotTheme.muted)
         .padding(.horizontal, 20)
         .frame(height: 32)
+        .background(ShotTheme.panel)
+        .overlay(alignment: .top) { Rectangle().fill(ShotTheme.border).frame(height: 1) }
     }
     private func inspectorLabel(_ text: String) -> some View {
-        Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(EditorStyle.muted)
+        Text(text).font(.system(size: 11, weight: .semibold)).foregroundStyle(ShotTheme.muted)
     }
     private var palette: [NSColor] {
-        [.init(srgbRed: 0.8, green: 0.96, blue: 0.3, alpha: 1), .systemRed, .systemOrange, .systemBlue, .white, .black]
+        [NSColor(ShotTheme.accent), .systemRed, .systemOrange, .systemBlue, .white, .black]
     }
     private func saveToLibrary() {
         NSApp.keyWindow?.makeFirstResponder(nil)

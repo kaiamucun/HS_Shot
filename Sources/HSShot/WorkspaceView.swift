@@ -3,15 +3,6 @@ import AppKit
 import AVFoundation
 import UniformTypeIdentifiers
 
-enum ShotTheme {
-    static let background = Color(red: 0.055, green: 0.067, blue: 0.085)
-    static let sidebar = Color(red: 0.075, green: 0.087, blue: 0.105)
-    static let panel = Color(red: 0.10, green: 0.115, blue: 0.135)
-    static let muted = Color(red: 0.53, green: 0.57, blue: 0.62)
-    static let lime = Color(red: 0.79, green: 0.96, blue: 0.43)
-    static let border = Color.white.opacity(0.075)
-}
-
 struct WorkspaceView: View {
     @ObservedObject var model: AppModel
     @State private var dropTarget = false
@@ -28,13 +19,14 @@ struct WorkspaceView: View {
             }
         }
         .background(ShotTheme.background)
-        .foregroundStyle(.white)
-        .preferredColorScheme(.dark)
+        .foregroundStyle(ShotTheme.text)
+        .tint(ShotTheme.accent)
+        .preferredColorScheme(.light)
         .font(.system(size: 13))
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
                 Label(toast, systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ShotTheme.lime)
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(ShotTheme.accent)
                     .padding(.horizontal, 18).padding(.vertical, 12)
                     .background(.regularMaterial, in: Capsule()).padding(.bottom, 44)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -50,7 +42,7 @@ struct WorkspaceView: View {
             }
             return true
         }
-        .overlay { if dropTarget { RoundedRectangle(cornerRadius: 12).stroke(ShotTheme.lime, lineWidth: 3).padding(4).allowsHitTesting(false) } }
+        .overlay { if dropTarget { RoundedRectangle(cornerRadius: 12).stroke(ShotTheme.accent, lineWidth: 3).padding(4).allowsHitTesting(false) } }
         .alert("操作を完了できませんでした", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("閉じる", role: .cancel) { model.errorMessage = nil }
             Button("画面収録の設定") { model.openScreenSettings(); model.errorMessage = nil }
@@ -61,19 +53,19 @@ struct WorkspaceView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 11).fill(ShotTheme.lime).frame(width: 38, height: 38)
-                    Image(systemName: "viewfinder").font(.system(size: 23, weight: .medium)).foregroundStyle(ShotTheme.background)
+                    RoundedRectangle(cornerRadius: 11).fill(ShotTheme.accent).frame(width: 38, height: 38)
+                    Image(systemName: "viewfinder").font(.system(size: 23, weight: .medium)).foregroundStyle(ShotTheme.onAccent)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text("HS Shot").font(.system(size: 20, weight: .bold, design: .rounded)).tracking(-0.5)
-                    Text("CAPTURE YOUR CLARITY").font(.system(size: 7, weight: .semibold)).tracking(1.4).foregroundStyle(ShotTheme.muted)
+                    Text("スクショを、もっと気軽に。").font(.system(size: 9)).foregroundStyle(ShotTheme.muted)
                 }
             }.padding(.top, 32).padding(.bottom, 32).padding(.horizontal, 22)
 
             Button { model.capture(.area) } label: {
-                HStack { Image(systemName: "plus").font(.system(size: 13, weight: .bold)); Text("新規キャプチャ").fontWeight(.semibold); Spacer(); Text("⌘⇧2").font(.system(size: 10, design: .monospaced)).opacity(0.6) }
-                    .foregroundStyle(ShotTheme.background).padding(.horizontal, 13).frame(height: 40)
-                    .background(ShotTheme.lime, in: RoundedRectangle(cornerRadius: 9))
+                HStack { Image(systemName: "plus").font(.system(size: 13, weight: .bold)); Text("新規キャプチャ").fontWeight(.semibold); Spacer(); Text("⌘⇧2").font(.system(size: 10, design: .monospaced)) }
+                    .foregroundStyle(ShotTheme.onAccent).padding(.horizontal, 13).frame(height: 40)
+                    .background(ShotTheme.accent, in: RoundedRectangle(cornerRadius: 9))
             }.buttonStyle(.plain).padding(.horizontal, 16).disabled(model.isBusy)
 
             Text("ライブラリ").font(.system(size: 10, weight: .semibold)).foregroundStyle(ShotTheme.muted).padding(.leading, 25).padding(.top, 30).padding(.bottom, 10)
@@ -84,14 +76,14 @@ struct WorkspaceView: View {
                         Text(section.rawValue).font(.system(size: 12, weight: model.section == section ? .semibold : .regular))
                         Spacer()
                         Text("\(count(section))").font(.system(size: 10, design: .monospaced)).foregroundStyle(ShotTheme.muted)
-                    }.foregroundStyle(model.section == section ? ShotTheme.lime : Color.white.opacity(0.62))
+                    }.foregroundStyle(model.section == section ? ShotTheme.accent : ShotTheme.text.opacity(0.72))
                         .padding(.horizontal, 12).frame(height: 39)
-                        .background(model.section == section ? ShotTheme.lime.opacity(0.075) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                        .background(model.section == section ? ShotTheme.accent.opacity(0.075) : .clear, in: RoundedRectangle(cornerRadius: 7))
                 }.buttonStyle(.plain).padding(.horizontal, 13)
             }
             Spacer()
             VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: "lock.shield").font(.system(size: 20, weight: .light)).foregroundStyle(ShotTheme.lime.opacity(0.7))
+                Image(systemName: "lock.shield").font(.system(size: 20, weight: .light)).foregroundStyle(ShotTheme.accent.opacity(0.7))
                 Text("あなたのMacに。\nあなたのアイデアを。").font(.system(size: 15, weight: .medium)).lineSpacing(4)
                 Text("キャプチャはローカルに保存。\n外部への自動送信はありません。")
                     .font(.system(size: 10)).lineSpacing(4).foregroundStyle(ShotTheme.muted)
@@ -100,7 +92,7 @@ struct WorkspaceView: View {
             Divider().overlay(ShotTheme.border).padding(.horizontal, 20)
             Button { model.section = .settings } label: {
                 HStack(spacing: 10) { Image(systemName: "slider.horizontal.3"); Text("設定"); Spacer(); Text("1.0").font(.system(size: 10, design: .monospaced)) }
-                    .foregroundStyle(model.section == .settings ? ShotTheme.lime : ShotTheme.muted).padding(24)
+                    .foregroundStyle(model.section == .settings ? ShotTheme.accent : ShotTheme.muted).padding(24)
             }.buttonStyle(.plain)
         }.background(ShotTheme.sidebar)
     }
@@ -133,7 +125,7 @@ struct WorkspaceView: View {
                     Text("\(model.filteredItems.count)").font(.system(size: 10, weight: .medium, design: .monospaced)).foregroundStyle(ShotTheme.muted)
                         .padding(.horizontal, 7).padding(.vertical, 3).background(ShotTheme.panel, in: Capsule())
                     Spacer()
-                    Image(systemName: "square.grid.2x2.fill").font(.system(size: 11)).foregroundStyle(ShotTheme.lime)
+                    Image(systemName: "square.grid.2x2.fill").font(.system(size: 11)).foregroundStyle(ShotTheme.accent)
                     Text("新しい順").font(.system(size: 10)).foregroundStyle(ShotTheme.muted)
                 }
                 if model.filteredItems.isEmpty { emptyState }
@@ -156,7 +148,7 @@ struct WorkspaceView: View {
     private var captureLauncher: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                HStack(spacing: 7) { Circle().fill(ShotTheme.lime).frame(width: 5, height: 5); Text("READY WHEN YOU ARE").font(.system(size: 8, weight: .semibold)).tracking(1.8).foregroundStyle(ShotTheme.lime) }
+                HStack(spacing: 7) { Circle().fill(ShotTheme.accent).frame(width: 5, height: 5); Text("すぐに撮影できます").font(.system(size: 10, weight: .medium)).foregroundStyle(ShotTheme.accent) }
                 Spacer()
                 Menu {
                     Button("遅延なし") { model.captureDelay = 0 }
@@ -187,18 +179,18 @@ struct WorkspaceView: View {
                 if model.isBusy { ProgressView().controlSize(.small) }
             }.buttonStyle(.plain).font(.system(size: 10)).foregroundStyle(ShotTheme.muted)
         }.padding(23)
-            .background(LinearGradient(colors: [Color(red: 0.12, green: 0.15, blue: 0.16), ShotTheme.panel.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 13))
+            .background(LinearGradient(colors: [ShotTheme.accentSoft, ShotTheme.panel], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 13))
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(ShotTheme.border, lineWidth: 1))
     }
 
     private var emptyState: some View {
         VStack(spacing: 15) {
             ZStack {
-                RoundedRectangle(cornerRadius: 18).fill(ShotTheme.lime.opacity(0.035)).frame(width: 138, height: 94).rotationEffect(.degrees(-9))
+                RoundedRectangle(cornerRadius: 18).fill(ShotTheme.accent.opacity(0.035)).frame(width: 138, height: 94).rotationEffect(.degrees(-9))
                 RoundedRectangle(cornerRadius: 12).fill(ShotTheme.panel).frame(width: 112, height: 78)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ShotTheme.lime.opacity(0.25), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ShotTheme.accent.opacity(0.25), lineWidth: 1))
                     .rotationEffect(.degrees(6))
-                Image(systemName: "viewfinder").font(.system(size: 31, weight: .ultraLight)).foregroundStyle(ShotTheme.lime)
+                Image(systemName: "viewfinder").font(.system(size: 31, weight: .ultraLight)).foregroundStyle(ShotTheme.accent)
             }.padding(.bottom, 6)
             Text(model.search.isEmpty ? "最初の1枚を、ここから。" : "一致するキャプチャがありません").font(.system(size: 17, weight: .medium))
             Text(model.search.isEmpty ? "撮影した画像や動画がここに並びます。\n画像ファイルのドラッグ＆ドロップでも追加できます。" : "別のキーワードを試してください。")
@@ -206,8 +198,8 @@ struct WorkspaceView: View {
             if model.search.isEmpty {
                 Button { model.capture(.area) } label: {
                     HStack(spacing: 10) { Text("範囲を選んで撮影"); Image(systemName: "arrow.up.right") }
-                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(ShotTheme.lime)
-                        .padding(.horizontal, 17).padding(.vertical, 10).background(ShotTheme.lime.opacity(0.07), in: Capsule())
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(ShotTheme.accent)
+                        .padding(.horizontal, 17).padding(.vertical, 10).background(ShotTheme.accent.opacity(0.07), in: Capsule())
                 }.buttonStyle(.plain).padding(.top, 5)
             }
         }.frame(maxWidth: .infinity).frame(minHeight: 270)
@@ -216,7 +208,7 @@ struct WorkspaceView: View {
 
     private var footer: some View {
         HStack(spacing: 7) {
-            Circle().fill(ShotTheme.lime.opacity(0.8)).frame(width: 4, height: 4)
+            Circle().fill(ShotTheme.accent.opacity(0.8)).frame(width: 4, height: 4)
             Text("ローカルストレージ").font(.system(size: 9))
             Text("·  \(model.totalSize)").font(.system(size: 9, design: .monospaced))
             Spacer()
@@ -238,7 +230,7 @@ struct WorkspaceView: View {
             Button { model.copy(item) } label: { Image(systemName: "doc.on.doc") }.help("コピー")
             Button { model.favorite(item) } label: { Image(systemName: item.isFavorite ? "star.fill" : "star") }.help("お気に入り")
             Button { model.export(item) } label: { Label("書き出す", systemImage: "square.and.arrow.up") }
-        }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(ShotTheme.lime)
+        }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(ShotTheme.accent)
             .padding(16).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 10))
     }
 
@@ -279,9 +271,9 @@ private struct CaptureAction: View {
             VStack(alignment: .leading, spacing: 0) {
                 Image(systemName: icon).font(.system(size: 22, weight: .light)).padding(.bottom, 16)
                 HStack { Text(title).font(.system(size: 12, weight: .semibold)); Spacer() }
-                Text(subtitle).font(.system(size: 9, design: .monospaced)).opacity(0.5).padding(.top, 6)
-            }.foregroundStyle(accent ? ShotTheme.background : .white.opacity(0.85)).padding(16).frame(maxWidth: .infinity)
-                .background(accent ? ShotTheme.lime : Color.white.opacity(hovering ? 0.08 : 0.035), in: RoundedRectangle(cornerRadius: 8))
+                Text(subtitle).font(.system(size: 9, design: .monospaced)).foregroundStyle(accent ? ShotTheme.onAccent : ShotTheme.muted).padding(.top, 6)
+            }.foregroundStyle(accent ? ShotTheme.onAccent : ShotTheme.text).padding(16).frame(maxWidth: .infinity)
+                .background(accent ? ShotTheme.accent : (hovering ? ShotTheme.accentSoft : ShotTheme.panel), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent ? .clear : ShotTheme.border, lineWidth: 1))
         }.buttonStyle(.plain).onHover { hovering = $0 }
     }
@@ -295,13 +287,13 @@ private struct CaptureCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.025))
+                RoundedRectangle(cornerRadius: 9).fill(ShotTheme.canvas)
                 if let thumbnail { Image(nsImage: thumbnail).resizable().scaledToFit().padding(12) }
                 else { Image(systemName: item.kind == .video ? "play.rectangle" : "photo").font(.system(size: 30, weight: .light)).foregroundStyle(ShotTheme.muted) }
-                if item.isFavorite { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(ShotTheme.lime).padding(10) }
-                if item.kind == .video { Image(systemName: "play.circle.fill").font(.system(size: 26)).shadow(radius: 4).padding(10) }
+                if item.isFavorite { Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(ShotTheme.accent).padding(10) }
+                if item.kind == .video { Image(systemName: "play.circle.fill").font(.system(size: 26)).foregroundStyle(.white).shadow(radius: 4).padding(10) }
             }.frame(height: 160).clipped()
-                .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? ShotTheme.lime.opacity(0.8) : ShotTheme.border, lineWidth: selected ? 1.5 : 1))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? ShotTheme.accent.opacity(0.8) : ShotTheme.border, lineWidth: selected ? 1.5 : 1))
             Text(item.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
             HStack {
                 Text(item.createdAt, format: .dateTime.month().day().hour().minute())
@@ -335,7 +327,7 @@ struct SettingsView: View {
                         }
                         Spacer()
                         Button(model.screenPermission ? "設定を開く" : "アクセスを許可") { model.requestPermission() }
-                            .tint(ShotTheme.lime)
+                            .tint(ShotTheme.accent)
                     }
                 }
                 settingsGroup("撮影と録画", icon: "viewfinder") {
@@ -363,11 +355,11 @@ struct SettingsView: View {
     }
     private func settingsGroup<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label(title, systemImage: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(ShotTheme.lime)
+            Label(title, systemImage: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(ShotTheme.accent)
             content().font(.system(size: 12)).toggleStyle(.switch).controlSize(.small)
         }.padding(22).frame(maxWidth: .infinity, alignment: .leading).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 12))
     }
     private func shortcut(_ name: String, _ keys: String) -> some View {
-        HStack { Text(name).foregroundStyle(.white.opacity(0.8)); Spacer(); Text(keys).font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted) }.frame(maxWidth: 450)
+        HStack { Text(name).foregroundStyle(ShotTheme.text); Spacer(); Text(keys).font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted) }.frame(maxWidth: 450)
     }
 }

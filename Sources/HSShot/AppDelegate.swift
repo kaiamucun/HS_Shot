@@ -16,6 +16,9 @@ import Combine
     private var subscriptions = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.appearance = NSAppearance(named: .aqua)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) { NSApp.applicationIconImage = icon }
         do {
             let root = ProcessInfo.processInfo.environment["HSSHOT_LIBRARY_PATH"].map { URL(fileURLWithPath: $0) }
             model = AppModel(library: try LibraryStore(root: root))
@@ -51,7 +54,8 @@ import Combine
         mainWindow.titleVisibility = .hidden
         mainWindow.toolbarStyle = .unified
         mainWindow.minSize = NSSize(width: 1020, height: 700)
-        mainWindow.backgroundColor = NSColor(red: 0.055, green: 0.067, blue: 0.085, alpha: 1)
+        mainWindow.backgroundColor = NSColor(ShotTheme.background)
+        mainWindow.appearance = NSAppearance(named: .aqua)
         mainWindow.contentView = NSHostingView(rootView: WorkspaceView(model: model).padding(.top, 24).background(ShotTheme.background))
         mainWindow.isReleasedWhenClosed = false
         mainWindow.delegate = self
@@ -222,6 +226,7 @@ import Combine
     private func makePanel(width: CGFloat, height: CGFloat) -> NSPanel {
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true; panel.level = .floating; panel.hidesOnDeactivate = false
+        panel.appearance = NSAppearance(named: .aqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
         panel.isReleasedWhenClosed = false
@@ -234,6 +239,7 @@ import Combine
         let height = max(160, min(600, width * size.height / max(size.width, 1)))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height + 38), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "ピン留め · HS Shot"
+        window.appearance = NSAppearance(named: .aqua)
         window.level = .floating; window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false; window.delegate = self
         window.contentView = NSHostingView(rootView: PinnedImageView(image: image, opacityChanged: { [weak window] value in window?.alphaValue = value }))
@@ -267,7 +273,7 @@ private struct QuickAccessView: View {
             ZStack(alignment: .topTrailing) {
                 Button { NSApp.activate(ignoringOtherApps: true); model.edit(item) } label: {
                     ZStack {
-                        Color.black.opacity(0.15)
+                        ShotTheme.canvas
                         if let image = NSImage(contentsOf: model.library.url(for: item)) {
                             Image(nsImage: image).resizable().scaledToFit().padding(9)
                         }
@@ -275,7 +281,7 @@ private struct QuickAccessView: View {
                     }.frame(height: 155).contentShape(Rectangle())
                 }.buttonStyle(.plain).onHover { hovering = $0 }.help("クリックして注釈エディタを開く")
                     .onDrag { NSItemProvider(contentsOf: model.library.url(for: item)) ?? NSItemProvider() }
-                Button(action: close) { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.7)).frame(width: 23, height: 23).background(.black.opacity(0.5), in: Circle()) }
+                Button(action: close) { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(ShotTheme.muted).frame(width: 23, height: 23).background(ShotTheme.panel.opacity(0.96), in: Circle()) }
                     .buttonStyle(.plain).padding(8).help("このプレビューを閉じる")
             }
             HStack(spacing: 0) {
@@ -285,13 +291,13 @@ private struct QuickAccessView: View {
                 quickButton("ピン", "pin") { model.pin(item) }
             }.padding(.vertical, 10)
         }.background(ShotTheme.panel.opacity(0.98), in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.14), lineWidth: 1)).clipShape(RoundedRectangle(cornerRadius: 13))
-            .preferredColorScheme(.dark)
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(ShotTheme.border, lineWidth: 1)).clipShape(RoundedRectangle(cornerRadius: 13))
+            .preferredColorScheme(.light)
     }
     private func quickButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 4) { Image(systemName: icon).font(.system(size: 14, weight: .medium)); Text(title).font(.system(size: 9)) }
-                .foregroundStyle(title == "編集" ? ShotTheme.lime : .white.opacity(0.8)).frame(maxWidth: .infinity).contentShape(Rectangle())
+                .foregroundStyle(title == "編集" ? ShotTheme.accent : ShotTheme.text).frame(maxWidth: .infinity).contentShape(Rectangle())
         }.buttonStyle(.plain).help(title)
     }
 }
@@ -308,7 +314,7 @@ private struct RecordingPanelView: View {
             Spacer()
             Button { model.stopRecording() } label: { Image(systemName: "stop.fill").foregroundStyle(.white).frame(width: 36, height: 36).background(.red, in: RoundedRectangle(cornerRadius: 8)) }
                 .buttonStyle(.plain).disabled(model.recorder.isFinishing).help("録画を停止して保存")
-        }.padding(17).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 13)).preferredColorScheme(.dark)
+        }.padding(17).foregroundStyle(ShotTheme.text).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 13)).preferredColorScheme(.light)
     }
 }
 
@@ -316,7 +322,7 @@ private struct ScrollPanelView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { Label("スクロール結合", systemImage: "rectangle.expand.vertical").font(.system(size: 13, weight: .semibold)); Spacer(); Text("\(model.scrollingFrames.count)枚").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.lime) }
+            HStack { Label("スクロール結合", systemImage: "rectangle.expand.vertical").font(.system(size: 13, weight: .semibold)); Spacer(); Text("\(model.scrollingFrames.count)枚").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.accent) }
             Text("同じ幅の範囲を撮影し、下へスクロールして追加。\n前の画像が1/3程度重なるように選んでください。")
                 .font(.system(size: 10)).lineSpacing(4).foregroundStyle(ShotTheme.muted)
             if let error = model.scrollingError {
@@ -333,10 +339,10 @@ private struct ScrollPanelView: View {
                 Button("キャンセル") { model.cancelScrolling() }.buttonStyle(.plain).foregroundStyle(ShotTheme.muted).disabled(model.isBusy)
                 Spacer()
                 Button("＋ 範囲を撮影") { model.addScrollFrame() }.disabled(model.isBusy)
-                Button("結合して編集") { model.finishScrolling() }.tint(ShotTheme.lime).disabled(model.scrollingFrames.isEmpty || model.isBusy)
+                Button("結合して編集") { model.finishScrolling() }.tint(ShotTheme.accent).disabled(model.scrollingFrames.isEmpty || model.isBusy)
             }.font(.system(size: 11))
             if model.isBusy { ProgressView().controlSize(.small) }
-        }.padding(18).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 13)).preferredColorScheme(.dark)
+        }.padding(18).foregroundStyle(ShotTheme.text).background(ShotTheme.panel, in: RoundedRectangle(cornerRadius: 13)).preferredColorScheme(.light)
     }
 }
 
@@ -348,6 +354,6 @@ private struct PinnedImageView: View {
         VStack(spacing: 0) {
             Image(nsImage: image).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack { Image(systemName: "circle.lefthalf.filled"); Slider(value: $opacity, in: 0.2...1).onChange(of: opacity) { _, value in opacityChanged(value) }; Button("コピー") { NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([image]) } }.font(.system(size: 10)).padding(9)
-        }.background(ShotTheme.background).preferredColorScheme(.dark)
+        }.foregroundStyle(ShotTheme.text).background(ShotTheme.background).preferredColorScheme(.light)
     }
 }

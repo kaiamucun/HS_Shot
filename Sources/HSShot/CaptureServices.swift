@@ -26,7 +26,7 @@ enum CaptureError: LocalizedError {
     }
 }
 
-/// Uses macOS's selection UI, preserving the selected display's native resolution.
+/// Captures native pixels, with an app-owned area selector and macOS's window selector.
 /// The caller is responsible for hiding its own windows before starting capture.
 @MainActor
 final class CaptureService {
@@ -52,9 +52,31 @@ final class CaptureService {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("HSShot-Captures", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("capture-\(UUID().uuidString).png")
+        if mode == .area {
+            do {
+                let snapshots = try await AreaSelectionSession.freezeDisplays()
+                guard !Task.isCancelled else { return nil }
+                let selector = AreaSelectionSession(snapshots: snapshots)
+                guard let image = await selector.select(), !Task.isCancelled else { return nil }
+                guard let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else {
+                    throw CaptureError.failed("画像ファイルを作成できませんでした。")
+                }
+                CGImageDestinationAddImage(destination, image, nil)
+                guard CGImageDestinationFinalize(destination) else {
+                    throw CaptureError.failed("画像ファイルへの書き込みに失敗しました。")
+                }
+                return url
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                if Task.isCancelled || error is CancellationError { return nil }
+                if !CGPreflightScreenCaptureAccess() { throw CaptureError.permissionDenied }
+                if let captureError = error as? CaptureError { throw captureError }
+                throw CaptureError.failed(error.localizedDescription)
+            }
+        }
         var arguments = ["-x", "-t", "png"]
         switch mode {
-        case .area: arguments += ["-i", "-s"]
+        case .area: break // Handled by the area selection session above.
         case .window: arguments += ["-i", "-w"]
         case .fullScreen: arguments += ["-m"]
         }

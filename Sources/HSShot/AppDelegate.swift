@@ -73,7 +73,11 @@ import Combine
     func applicationDidBecomeActive(_ notification: Notification) {
         model?.screenPermission = CGPreflightScreenCaptureAccess()
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showMainWindow(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard model?.isBusy != true else { return false }
+        showMainWindow()
+        return true
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if model.recorder.isRecording || model.recorder.isFinishing {
@@ -197,9 +201,10 @@ import Combine
         quickPanels.forEach { $0.orderFrontRegardless() }
         // Keep the newest four previews stacked at the lower-left until explicitly dismissed.
         if quickPanels.count >= 4 { quickPanels.removeFirst().close() }
-        let panel = makePanel(width: 308, height: 222)
+        let size = QuickAccessGeometry.panelSize(for: CGSize(width: item.width, height: item.height))
+        let panel = makePanel(width: size.width, height: size.height)
         panel.isMovableByWindowBackground = true
-        panel.contentView = NSHostingView(rootView: QuickAccessView(model: model, item: item) { [weak self, weak panel] in
+        panel.contentView = NSHostingView(rootView: QuickAccessView(model: model, item: item, size: size) { [weak self, weak panel] in
             guard let panel else { return }; panel.close(); self?.quickPanels.removeAll { $0 === panel }
         })
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
@@ -266,39 +271,76 @@ import Combine
 private struct QuickAccessView: View {
     @ObservedObject var model: AppModel
     let item: CaptureItem
+    let size: CGSize
     let close: () -> Void
     @State private var hovering = false
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                Button { NSApp.activate(ignoringOtherApps: true); model.edit(item) } label: {
-                    ZStack {
-                        ShotTheme.canvas
-                        if let image = NSImage(contentsOf: model.library.url(for: item)) {
-                            Image(nsImage: image).resizable().scaledToFit().padding(9)
-                        }
-                        if hovering { Label("クリックして編集", systemImage: "pencil.tip.crop.circle").font(.system(size: 11, weight: .medium)).padding(9).background(.ultraThinMaterial, in: Capsule()) }
-                    }.frame(height: 155).contentShape(Rectangle())
-                }.buttonStyle(.plain).onHover { hovering = $0 }.help("クリックして注釈エディタを開く")
-                    .onDrag { NSItemProvider(contentsOf: model.library.url(for: item)) ?? NSItemProvider() }
-                Button(action: close) { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(ShotTheme.muted).frame(width: 23, height: 23).background(ShotTheme.panel.opacity(0.96), in: Circle()) }
-                    .buttonStyle(.plain).padding(8).help("このプレビューを閉じる")
+        ZStack {
+            ShotTheme.canvas
+            Button(action: edit) {
+                Group {
+                    if let image = NSImage(contentsOf: model.library.url(for: item)) {
+                        Image(nsImage: image).resizable().scaledToFit()
+                    } else {
+                        Image(systemName: "photo").foregroundStyle(ShotTheme.muted)
+                    }
+                }.frame(width: size.width, height: size.height)
+                    .blur(radius: hovering ? 6 : 0)
+                    .overlay { if hovering { Color.gray.opacity(0.28).allowsHitTesting(false) } }
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityLabel("キャプチャを編集")
+                .help("クリックして注釈エディタを開く")
+                .onDrag { NSItemProvider(contentsOf: model.library.url(for: item)) ?? NSItemProvider() }
+            if hovering {
+                VStack(spacing: 8) {
+                    pillButton("コピー") { model.copy(item) }
+                    pillButton("保存", action: save)
+                }
             }
-            HStack(spacing: 0) {
-                quickButton("編集", "pencil.tip.crop.circle") { NSApp.activate(ignoringOtherApps: true); model.edit(item) }
-                quickButton("コピー", "doc.on.doc") { model.copy(item) }
-                quickButton("保存", "square.and.arrow.down") { NSApp.activate(ignoringOtherApps: true); model.export(item) }
-                quickButton("ピン", "pin") { model.pin(item) }
-            }.padding(.vertical, 10)
-        }.background(ShotTheme.panel.opacity(0.98), in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(ShotTheme.border, lineWidth: 1)).clipShape(RoundedRectangle(cornerRadius: 13))
+        }.frame(width: size.width, height: size.height)
+            .foregroundStyle(ShotTheme.text)
+            .overlay(alignment: .topLeading) {
+                if hovering { cornerButton("プレビューを閉じる", "xmark", action: close).padding(6) }
+            }
+            .overlay(alignment: .topTrailing) {
+                if hovering { cornerButton("ピン留め", "pin.fill") { model.pin(item) }.padding(6) }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if hovering { cornerButton("編集", "pencil.tip", action: edit).padding(6) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.9), lineWidth: 1))
+            .onHover { hovering = $0 }
+            .contextMenu {
+                Button("編集", systemImage: "pencil.tip", action: edit)
+                Button("コピー", systemImage: "doc.on.doc") { model.copy(item) }
+                Button("保存", systemImage: "square.and.arrow.down", action: save)
+                Button("ピン留め", systemImage: "pin") { model.pin(item) }
+                Divider()
+                Button("プレビューを閉じる", systemImage: "xmark", action: close)
+            }
             .preferredColorScheme(.light)
     }
-    private func quickButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
+    private func cornerButton(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) { Image(systemName: icon).font(.system(size: 14, weight: .medium)); Text(title).font(.system(size: 9)) }
-                .foregroundStyle(title == "編集" ? ShotTheme.accent : ShotTheme.text).frame(maxWidth: .infinity).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(title)
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                .frame(width: 22, height: 22).background(ShotTheme.panel.opacity(0.92), in: Circle())
+        }.buttonStyle(.plain).accessibilityLabel(title).help(title)
+    }
+    private func pillButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13, weight: .semibold))
+                .frame(width: 66, height: 24).background(ShotTheme.panel.opacity(0.92), in: Capsule())
+        }.buttonStyle(.plain).accessibilityLabel(title).help(title)
+    }
+    private func edit() {
+        NSApp.activate(ignoringOtherApps: true)
+        model.edit(item)
+    }
+    private func save() {
+        NSApp.activate(ignoringOtherApps: true)
+        model.export(item)
     }
 }
 

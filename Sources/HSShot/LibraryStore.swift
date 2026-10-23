@@ -1,0 +1,124 @@
+import AppKit
+import AVFoundation
+import Combine
+
+enum MediaKind: String, Codable { case image, video }
+
+struct CaptureItem: Identifiable, Codable, Hashable {
+    let id: UUID
+    var title: String
+    let filename: String
+    let kind: MediaKind
+    let createdAt: Date
+    let width: Int
+    let height: Int
+    let byteCount: Int64
+    var isFavorite: Bool
+}
+
+enum LibraryError: LocalizedError {
+    case invalidImage, missingFile, unsupportedFile
+    var errorDescription: String? {
+        switch self {
+        case .invalidImage: return "画像を読み込めませんでした。"
+        case .missingFile: return "元のファイルが見つかりません。"
+        case .unsupportedFile: return "PNG・JPEGなどの画像、MP4・MOVの動画に対応しています。"
+        }
+    }
+}
+
+final class LibraryStore: ObservableObject {
+    @Published private(set) var items: [CaptureItem] = []
+    let root: URL
+    private var indexURL: URL { root.appendingPathComponent("library.json") }
+
+    init(root: URL? = nil) throws {
+        self.root = root ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HS Shot", isDirectory: true)
+        try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: indexURL.path) {
+            do {
+                let decoded = try JSONDecoder().decode([CaptureItem].self, from: Data(contentsOf: indexURL))
+                items = decoded.filter {
+                    $0.filename == URL(fileURLWithPath: $0.filename).lastPathComponent &&
+                    FileManager.default.fileExists(atPath: self.root.appendingPathComponent($0.filename).path)
+                }.sorted { $0.createdAt > $1.createdAt }
+            } catch {
+                let backup = self.root.appendingPathComponent("library-corrupt-\(UUID().uuidString).json")
+                try FileManager.default.copyItem(at: indexURL, to: backup)
+                items = []
+            }
+        }
+    }
+
+    func url(for item: CaptureItem) -> URL { root.appendingPathComponent(item.filename) }
+
+    @discardableResult func add(image: NSImage, title: String) throws -> CaptureItem {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
+            throw LibraryError.invalidImage
+        }
+        return try persist(data: data, ext: "png", kind: .image, title: title, width: cg.width, height: cg.height)
+    }
+
+    @discardableResult func add(file: URL, title: String? = nil) throws -> CaptureItem {
+        guard FileManager.default.fileExists(atPath: file.path) else { throw LibraryError.missingFile }
+        let name = title ?? file.deletingPathExtension().lastPathComponent
+        if ["mp4", "mov", "m4v"].contains(file.pathExtension.lowercased()) {
+            let id = UUID()
+            let filename = "\(id.uuidString).\(file.pathExtension.lowercased())"
+            let destination = root.appendingPathComponent(filename)
+            try FileManager.default.copyItem(at: file, to: destination)
+            let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let item = CaptureItem(id: id, title: name, filename: filename, kind: .video,
+                createdAt: Date(), width: 0, height: 0, byteCount: Int64(bytes), isFavorite: false)
+            do { try commit([item] + items) } catch { try? FileManager.default.removeItem(at: destination); throw error }
+            return item
+        }
+        guard let image = NSImage(contentsOf: file) else { throw LibraryError.unsupportedFile }
+        return try add(image: image, title: name)
+    }
+
+    private func persist(data: Data, ext: String, kind: MediaKind, title: String, width: Int, height: Int) throws -> CaptureItem {
+        let id = UUID()
+        let filename = "\(id.uuidString).\(ext)"
+        let destination = root.appendingPathComponent(filename)
+        try data.write(to: destination, options: .atomic)
+        let item = CaptureItem(id: id, title: title, filename: filename, kind: kind, createdAt: Date(),
+            width: width, height: height, byteCount: Int64(data.count), isFavorite: false)
+        do { try commit([item] + items) } catch { try? FileManager.default.removeItem(at: destination); throw error }
+        return item
+    }
+
+    func toggleFavorite(_ id: UUID) throws {
+        var updated = items
+        guard let i = updated.firstIndex(where: { $0.id == id }) else { return }
+        updated[i].isFavorite.toggle()
+        try commit(updated)
+    }
+
+    func rename(_ id: UUID, title: String) throws {
+        var updated = items
+        guard let i = updated.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        updated[i].title = trimmed
+        try commit(updated)
+    }
+
+    func delete(_ id: UUID) throws {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        // Commit metadata first; a failed file removal leaves only an orphan, never a broken history entry.
+        try commit(items.filter { $0.id != id })
+        if FileManager.default.fileExists(atPath: url(for: item).path) {
+            try FileManager.default.removeItem(at: url(for: item))
+        }
+    }
+
+    private func commit(_ next: [CaptureItem]) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(next).write(to: indexURL, options: .atomic)
+        items = next
+    }
+}

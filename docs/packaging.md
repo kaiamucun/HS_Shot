@@ -6,7 +6,7 @@
 ./scripts/build-pkg.sh
 ```
 
-`dist/HS-Shot-1.0.0.pkg` と同名の `.sha256` ファイルを作成します。バージョンはアプリの `Info.plist` から読み取ります。別の入力・出力先も指定できます。
+`dist/HS-Shot-1.0.1.pkg` と同名の `.sha256` ファイルを作成します。バージョンはアプリの `Info.plist` から読み取ります。別の入力・出力先も指定できます。
 
 ```sh
 ./scripts/build-pkg.sh "/path/to/HS Shot.app" "/path/to/HS-Shot.pkg"
@@ -21,12 +21,12 @@ PKGには `/Applications/HS Shot.app` だけを含めます。インストール
 公開前には、実機で確認した最終アプリからPKGを生成し、次のコマンドで内容とハッシュを確認してください。
 
 ```sh
-pkgutil --payload-files dist/HS-Shot-1.0.0.pkg
+pkgutil --payload-files dist/HS-Shot-1.0.1.pkg
 ```
 
 ハッシュ照合は `.sha256` とPKGがあるディレクトリで実行します。たとえば次の通りです。
 
 ```sh
 cd dist
-shasum -a 256 -c HS-Shot-1.0.0.pkg.sha256
+shasum -a 256 -c HS-Shot-1.0.1.pkg.sha256
 ```

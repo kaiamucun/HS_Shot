@@ -264,7 +264,7 @@ import Combine
     @objc private func importFile() { model.importFiles() }
     @objc private func settings() { model.section = .settings; showMainWindow() }
     @objc private func about() {
-        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "HS Shot", .applicationVersion: "1.0.0", .credits: NSAttributedString(string: "撮る。整える。伝わる。\nmacOS専用 · ローカルで完結")])
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: "HS Shot", .credits: NSAttributedString(string: "撮る。整える。伝わる。\nmacOS専用 · ローカルで完結")])
     }
 }
 

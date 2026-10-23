@@ -52,3 +52,6 @@
 - scripts/build-pkg.shで最終アプリを再ビルド・再署名せずPKG化。展開後の全ファイル一致・署名・実行バイナリ一致を確認。/Applications/HS Shot.appのみを含み、インストールスクリプトやユーザー画像は含めない。
 - 有効なDeveloper ID証明書なし。アプリはad hoc署名、PKGは未署名・未公証。PKGの実インストールは行っていない。
 - GitHubの指定リポジトリは空・非公開。可視性を維持してmainとReleaseを公開する。
+- mainへpushし、v1.0.0の開発版ReleaseへPKGとSHA-256ファイルを添付。GitHubから再ダウンロードし、SHA-256と元PKGのバイト一致を確認。Release: https://github.com/kaiamucun/HS_Shot/releases/tag/v1.0.0
+- PKG SHA-256: 4de5dd902725107ce2e381a774f4f906d4947aa410f0efee720b9eb811d5eccd。Releaseタグのソースは5a91821。
+- 最終版でEscキャンセル後も履歴8件不変を確認。保存した編集済み項目を履歴からダブルクリックし、1692×292・矢印・日本語を再確認した。

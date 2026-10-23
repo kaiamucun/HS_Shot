@@ -63,3 +63,4 @@
 - アプリのバージョンを1.0.1/ビルド2へ更新し、UI表示とAboutもBundle情報に合わせた。
 - Universalビルドと署名検証成功。最終版を画面収録に再登録し実撮影。426×383の新規画像が210×150のプレビュー枠になることを実機画像の寸法で確認。
 - 最終アプリからHS-Shot-1.0.1.pkgとSHA-256ファイルを作成、展開内容と全ファイル一致を確認。
+- v1.0.1を公開し、認証なしでPKGをダウンロード（HTTP200、1,318,525バイト）。検証済みPKGとのバイト一致とSHA-256 e7ef6c0cfd1fb7714f1e7ea1814f280f1461b201bc562fcaeee6b563b524ba79 を確認。Release: https://github.com/kaiamucun/HS_Shot/releases/tag/v1.0.1

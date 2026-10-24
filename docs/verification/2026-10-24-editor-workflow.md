@@ -36,4 +36,12 @@ This is an unsigned, unnotarized development pre-release. Intel execution and a 
 
 ## Publication
 
-Publication receipts and public download verification will be added after deployment.
+- App source: `989c225`, pushed to `origin/main`; release tag `v1.1.0` targets that source.
+- GitHub pre-release: https://github.com/kaiamucun/HS_Shot/releases/tag/v1.1.0 (not a draft). PKG and SHA-256 assets are uploaded.
+- Downloaded the public PKG without authentication and compared it byte-for-byte with the local installer. SHA-256 matches the package value above. The public checksum file also matches.
+- Existing public Site updated at https://hs-shot-download.kaiyamucun526.chatgpt.site — access mode remains `public`.
+- Site source: `3bc09f5dbb7a31c99ebc8177b87c35b55f6913ca`; saved version 2; deployment `appgdep_6adc1abdf5a48191a902c9d4f95ea423` succeeded at 2026-10-24 02:41:14 UTC.
+- Public browser check: new three-feature section visible, all three PKG links point to 1.1.0, images loaded, basic-operation video readyState 4, no horizontal overflow at 800 px. Local 390 px responsive check also passed.
+- Anonymous curl confirms new-version page content and all three download links. The CDN adds its script before the closing body tag; authored HTML otherwise matches the packaged source. Python urllib's default request received HTTP 403; normal curl and browser requests succeeded.
+- Kept the existing basic-operation video; added explicit text instructions for the 1.1.0 additions and the flattened-PNG limitation.
+- Normal user library reopened in version 1.1.0 with all 17 items. Verification fixture environment is no longer in use.

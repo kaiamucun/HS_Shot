@@ -84,4 +84,4 @@
 ## 2026-10-24 — 1.1.0 editor workflow
 - Implemented visible-preview replacement after successful editing saves, annotation correction/endpoint/style editing, and persisted editor preferences.
 - Full suite: 57 tests pass. Independent reviews complete. Universal app built and native area capture/edit/preview save/copy plus relaunch preferences verified.
-- Packaged the exact tested app; payload verification passed. Publication in progress; details in docs/verification/2026-10-24-editor-workflow.md.
+- Packaged the exact tested app; payload verification passed. GitHub v1.1.0 and public Site version 2 published and verified; details in docs/verification/2026-10-24-editor-workflow.md.

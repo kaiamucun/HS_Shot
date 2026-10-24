@@ -24,7 +24,7 @@
 2. [x] Preview continuity: AppModel.swift / AppDelegate.swift, focused state model if useful; tests for successful saves, failed saves, repeated saves, closed previews and original preservation.
 3. [x] Integrate and review: full Swift test suite, independent review, resolve findings. Bump to 1.1.0 / build 3 and build Universal app once source is final.
 4. [x] Real macOS checks: permission status, area capture, fixed lower-left preview, text correction/arrow adjustment/style changes, save reflected in preview, copied/exported output, settings remembered across editor and app relaunch.
-5. [ ] Package exact tested binary, verify extracted contents, publish new GitHub Release and PKG/SHA256, update existing public Site, verify public downloads match, record evidence and push docs.
+5. [x] Package exact tested binary, verify extracted contents, publish new GitHub Release and PKG/SHA256, update existing public Site, verify public downloads match, record evidence and push docs.
 
 ## Review focus
 - Cancelled text edit and Undo/Redo preserve original annotation identity and contents.

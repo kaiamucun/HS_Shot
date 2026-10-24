@@ -15,15 +15,17 @@ struct CaptureItem: Identifiable, Codable, Hashable {
     let byteCount: Int64
     var isFavorite: Bool
     var editableProjectVersion: Int? = nil
+    var isDraft: Bool? = nil
 }
 
 enum LibraryError: LocalizedError {
-    case invalidImage, missingFile, unsupportedFile
+    case invalidImage, missingFile, unsupportedFile, invalidDraft
     var errorDescription: String? {
         switch self {
         case .invalidImage: return "画像を読み込めませんでした。"
         case .missingFile: return "元のファイルが見つかりません。"
         case .unsupportedFile: return "PNG・JPEGなどの画像、MP4・MOVの動画に対応しています。"
+        case .invalidDraft: return "下書きが見つからないか、すでに完了しています。履歴から開き直してください。"
         }
     }
 }
@@ -55,7 +57,8 @@ final class LibraryStore: ObservableObject {
     func url(for item: CaptureItem) -> URL { root.appendingPathComponent(item.filename) }
 
     func editableProjectURL(for item: CaptureItem) -> URL {
-        root.appendingPathComponent("\(item.id.uuidString).hsedit.json")
+        let stem = URL(fileURLWithPath: item.filename).deletingPathExtension().lastPathComponent
+        return root.appendingPathComponent("\(stem).hsedit.json")
     }
 
     /// A missing marker means a legacy flat image. Marked but broken projects must never
@@ -66,7 +69,7 @@ final class LibraryStore: ObservableObject {
             if version > EditorProject.currentSchemaVersion { throw EditorProjectError.unsupportedVersion(version) }
             throw EditorProjectError.invalidData
         }
-        guard item.kind == .image else { throw EditorProjectError.invalidData }
+        guard item.kind == .image, ownedMediaURL(for: item) != nil else { throw EditorProjectError.invalidData }
         let projectURL = editableProjectURL(for: item)
         guard FileManager.default.fileExists(atPath: projectURL.path) else { throw EditorProjectError.missingData }
         do {
@@ -112,6 +115,67 @@ final class LibraryStore: ObservableObject {
         guard projectData.count <= EditorProject.maximumFileBytes else { throw EditorProjectError.invalidData }
         return try persist(data: data, ext: "png", kind: .image, title: title, width: cg.width, height: cg.height,
                            projectData: projectData)
+    }
+
+    /// Each write uses a new file pair. The index switches to it only after both files
+    /// are complete, so a failed save cannot damage the last recoverable draft.
+    @discardableResult
+    func saveDraft(image: NSImage, project: EditorProject, title: String,
+                   replacing draftID: UUID? = nil) throws -> CaptureItem {
+        let previous: CaptureItem?
+        if let draftID {
+            guard let item = items.first(where: { $0.id == draftID }), item.isDraft == true,
+                  item.kind == .image, item.editableProjectVersion == EditorProject.currentSchemaVersion,
+                  ownedMediaURL(for: item) != nil else { throw LibraryError.invalidDraft }
+            previous = item
+        } else { previous = nil }
+        try project.validate()
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let imageData = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
+            throw LibraryError.invalidImage
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let projectData = try encoder.encode(project)
+        guard projectData.count <= EditorProject.maximumFileBytes else { throw EditorProjectError.invalidData }
+
+        let generation = UUID()
+        let item = CaptureItem(id: previous?.id ?? UUID(), title: title,
+            filename: "\(generation.uuidString).png", kind: .image,
+            createdAt: previous?.createdAt ?? Date(), width: cg.width, height: cg.height,
+            byteCount: Int64(imageData.count) + Int64(projectData.count), isFavorite: previous?.isFavorite ?? false,
+            editableProjectVersion: EditorProject.currentSchemaVersion, isDraft: true)
+        let imageURL = url(for: item)
+        let projectURL = editableProjectURL(for: item)
+        do {
+            try imageData.write(to: imageURL, options: .atomic)
+            try projectData.write(to: projectURL, options: .atomic)
+            var next = items
+            if let previous, let index = next.firstIndex(where: { $0.id == previous.id }) {
+                next[index] = item
+            } else { next.insert(item, at: 0) }
+            try commit(next)
+        } catch {
+            try? FileManager.default.removeItem(at: imageURL)
+            try? FileManager.default.removeItem(at: projectURL)
+            throw error
+        }
+        // The published generation is already durable; orphan cleanup must never turn
+        // a successful save into an error or remove another history entry's files.
+        if let previous { try? removeUnreferencedOwnedFiles(for: previous) }
+        return item
+    }
+
+    @discardableResult
+    func finalizeDraft(_ id: UUID, title: String) throws -> CaptureItem {
+        var next = items
+        guard let index = next.firstIndex(where: { $0.id == id }), next[index].isDraft == true,
+              next[index].kind == .image, next[index].editableProjectVersion == EditorProject.currentSchemaVersion,
+              ownedMediaURL(for: next[index]) != nil else { throw LibraryError.invalidDraft }
+        next[index].isDraft = nil
+        next[index].title = title
+        try commit(next)
+        return next[index]
     }
 
     @discardableResult func add(file: URL, title: String? = nil) throws -> CaptureItem {
@@ -174,8 +238,22 @@ final class LibraryStore: ObservableObject {
         guard let item = items.first(where: { $0.id == id }) else { return }
         // Commit metadata first; a failed file removal leaves only an orphan, never a broken history entry.
         try commit(items.filter { $0.id != id })
-        if FileManager.default.fileExists(atPath: url(for: item).path) {
-            try FileManager.default.removeItem(at: url(for: item))
+        try removeUnreferencedOwnedFiles(for: item)
+    }
+
+    private func ownedMediaURL(for item: CaptureItem) -> URL? {
+        let name = URL(fileURLWithPath: item.filename)
+        guard name.lastPathComponent == item.filename,
+              UUID(uuidString: name.deletingPathExtension().lastPathComponent) != nil,
+              (item.kind == .image ? ["png"] : ["mp4", "mov", "m4v"]).contains(name.pathExtension) else { return nil }
+        return root.appendingPathComponent(item.filename)
+    }
+
+    private func removeUnreferencedOwnedFiles(for item: CaptureItem) throws {
+        guard let imageURL = ownedMediaURL(for: item),
+              !items.contains(where: { $0.filename == item.filename }) else { return }
+        if FileManager.default.fileExists(atPath: imageURL.path) {
+            try FileManager.default.removeItem(at: imageURL)
         }
         if item.editableProjectVersion != nil,
            FileManager.default.fileExists(atPath: editableProjectURL(for: item).path) {

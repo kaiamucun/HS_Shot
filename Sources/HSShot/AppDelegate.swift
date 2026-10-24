@@ -35,6 +35,12 @@ import Combine
             return self.showQuickAccess(item)
         }
         model.refreshQuickPanels = { [weak self] in self?.refreshQuickPanels() }
+        model.closeQuickPanelsForItem = { [weak self] id in
+            guard let self else { return }
+            let removed = self.quickPanels.filter { $0.preview.item.id == id }
+            self.quickPanels.removeAll { $0.preview.item.id == id }
+            removed.forEach { $0.panel.close() }
+        }
         model.showPin = { [weak self] in self?.pin($0) }
         model.showRecordingPanel = { [weak self] in self?.showActivity(recording: true) }
         model.showScrollPanel = { [weak self] in self?.showActivity(recording: false) }
@@ -91,6 +97,14 @@ import Combine
             alert.messageText = "録画を保存してから終了してください"
             alert.informativeText = "メニューバーまたは録画パネルの停止ボタンで、録画を保存できます。"
             alert.addButton(withTitle: "戻る"); alert.runModal()
+            return .terminateCancel
+        }
+        do { try EditorWindow.flushAutosaves() }
+        catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "編集内容を保存できないため、終了を中止しました"
+            alert.informativeText = "編集内容は開いた画面に残っています。\n\(error.localizedDescription)\n空き容量や保存先を確認してから、もう一度終了してください。"
+            alert.runModal()
             return .terminateCancel
         }
         return .terminateNow

@@ -28,13 +28,13 @@ struct EditorProject: Codable {
     let snapshot: Snapshot
 
     @MainActor
-    init(document: EditorDocument, sourceTitle: String) throws {
+    init(document: EditorDocument, sourceTitle: String, snapshot: EditorSnapshot? = nil) throws {
         guard let data = NSBitmapImageRep(cgImage: document.base).representation(using: .png, properties: [:]) else {
             throw EditorProjectError.invalidData
         }
         basePNG = data
         self.sourceTitle = sourceTitle
-        snapshot = try Snapshot(document.state)
+        self.snapshot = try Snapshot(snapshot ?? document.state)
         try validate()
     }
 

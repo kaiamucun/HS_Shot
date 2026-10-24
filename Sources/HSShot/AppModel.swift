@@ -50,12 +50,16 @@ struct CaptureStorageError: LocalizedError {
     var showQuickPanel: (CaptureItem) -> Void = { _ in }
     var previewForEditing: (CaptureItem) -> QuickAccessPreviewState = { QuickAccessPreviewState(item: $0) }
     var refreshQuickPanels: () -> Void = {}
+    var closeQuickPanelsForItem: (UUID) -> Void = { _ in }
     var showPin: (NSImage) -> Void = { _ in }
     var showRecordingPanel: () -> Void = {}
     var showScrollPanel: () -> Void = {}
     var closeActivityPanels: () -> Void = {}
     private var subscriptions = Set<AnyCancellable>()
     private var scrollingFrameURLs: [URL] = []
+    // Floating previews can be evicted while their editor is open. Keep one writer
+    // for each active draft independently of the preview panel's lifetime.
+    private(set) var activeEditorPreviews: [UUID: QuickAccessPreviewState] = [:]
 
     init(library: LibraryStore) {
         self.library = library
@@ -135,19 +139,30 @@ struct CaptureStorageError: LocalizedError {
     }
 
     func edit(_ item: CaptureItem) {
+        guard let item = library.items.first(where: { $0.id == item.id }) else {
+            closeQuickPanelsForItem(item.id)
+            showWorkspace()
+            fail(LibraryError.missingFile)
+            return
+        }
         guard item.kind == .image else {
             NSWorkspace.shared.open(library.url(for: item)); return
         }
-        let preview = previewForEditing(item)
+        let preview = activeEditorPreviews.values.first(where: { $0.canResume(item) }) ?? previewForEditing(item)
         let document: EditorDocument
         do { document = try preview.prepareDocument(using: library, preferences: EditorPreferences(defaults: .standard)) }
         catch { showWorkspace(); fail(error); return }
+        activeEditorPreviews[preview.sessionID] = preview
         preview.isEditing = true
         refreshQuickPanels()
         EditorWindow.open(sessionID: preview.sessionID, document: document, title: preview.originalItem.title, onSave: { [weak self] edited in
             guard let self else { throw LibraryError.missingFile }
             try self.saveEditedImage(edited, original: preview.originalItem, document: document, updating: preview)
+        }, onAutosave: { [weak self] edited in
+            guard let self else { throw LibraryError.missingFile }
+            try self.autosaveEditedImage(edited, document: document, updating: preview)
         }, onClose: { [weak self] in
+            self?.activeEditorPreviews.removeValue(forKey: preview.sessionID)
             preview.isEditing = false
             self?.refreshQuickPanels()
         })
@@ -158,11 +173,31 @@ struct CaptureStorageError: LocalizedError {
                          updating preview: QuickAccessPreviewState? = nil) throws -> CaptureItem {
         let sourceTitle = preview?.sourceTitle ?? original.title
         let project = try EditorProject(document: document, sourceTitle: sourceTitle)
-        let saved = try library.add(image: image, project: project, title: "\(sourceTitle) — 編集済み")
+        let saved: CaptureItem
+        if let preview, preview.item.isDraft == true {
+            let draft = try library.saveDraft(image: image, project: project, title: "\(sourceTitle) — 編集中", replacing: preview.item.id)
+            // If promotion fails, the latest saved draft remains recoverable and retryable.
+            preview.replace(sourceID: preview.item.id, with: draft)
+            saved = try library.finalizeDraft(draft.id, title: "\(sourceTitle) — 編集済み")
+        } else {
+            saved = try library.add(image: image, project: project, title: "\(sourceTitle) — 編集済み")
+        }
         selectedID = saved.id
         preview?.replace(sourceID: original.id, with: saved)
         notify("編集した画像を保存しました")
         return saved
+    }
+
+    @discardableResult
+    func autosaveEditedImage(_ image: NSImage, document: EditorDocument,
+                            updating preview: QuickAccessPreviewState) throws -> CaptureItem {
+        let current = preview.item
+        let project = try EditorProject(document: document, sourceTitle: preview.sourceTitle, snapshot: document.autosaveSnapshot)
+        let draft = try library.saveDraft(image: image, project: project, title: "\(preview.sourceTitle) — 編集中",
+                                         replacing: current.isDraft == true ? current.id : nil)
+        preview.replace(sourceID: current.id, with: draft)
+        if selectedID == nil || selectedID == current.id { selectedID = draft.id }
+        return draft
     }
 
     func copy(_ item: CaptureItem, feedback: Bool = true) {
@@ -182,7 +217,9 @@ struct CaptureStorageError: LocalizedError {
         panel.prompt = "書き出す"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let source = library.url(for: item)
+            // Autosave may rotate a draft's files while the save panel is open.
+            guard let current = library.items.first(where: { $0.id == item.id }) else { throw LibraryError.missingFile }
+            let source = library.url(for: current)
             guard source.standardizedFileURL != url.standardizedFileURL else { return }
             // Atomic write preserves the old file if reading or writing fails.
             try Data(contentsOf: source).write(to: url, options: .atomic)
@@ -198,13 +235,21 @@ struct CaptureStorageError: LocalizedError {
     func favorite(_ item: CaptureItem) { do { try library.toggleFavorite(item.id) } catch { fail(error) } }
     func reveal(_ item: CaptureItem) { NSWorkspace.shared.activateFileViewerSelecting([library.url(for: item)]) }
     func delete(_ item: CaptureItem) {
+        if activeEditorPreviews.values.contains(where: { $0.item.id == item.id && $0.item.isDraft == true }) {
+            errorMessage = "この下書きは編集中です。編集画面を閉じるか「完了」を押してから削除してください。"
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "このキャプチャを削除しますか？"
         alert.informativeText = "ライブラリ内のファイルを削除します。書き出したファイルは残ります。"
         alert.addButton(withTitle: "削除"); alert.addButton(withTitle: "キャンセル")
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        do { try library.delete(item.id); if selectedID == item.id { selectedID = nil } }
+        do {
+            try library.delete(item.id)
+            closeQuickPanelsForItem(item.id)
+            if selectedID == item.id { selectedID = nil }
+        }
         catch { fail(error) }
     }
 

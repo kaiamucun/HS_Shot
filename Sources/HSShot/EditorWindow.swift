@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
 
 @MainActor
 enum EditorWindow {
@@ -8,14 +9,17 @@ enum EditorWindow {
 
     @discardableResult
     static func open(sessionID: UUID, document: EditorDocument, title: String,
-                     onSave: @escaping (NSImage) throws -> Void, onClose: @escaping () -> Void) -> NSWindow {
+                     onSave: @escaping (NSImage) throws -> Void,
+                     onAutosave: ((NSImage) throws -> Void)? = nil, autosaveDelay: TimeInterval = 0.7,
+                     onClose: @escaping () -> Void) -> NSWindow {
         if let controller = controllers[sessionID], let window = controller.window {
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return window
         }
-        let controller = EditorWindowController(document: document, title: title, onSave: onSave) {
+        let controller = EditorWindowController(document: document, title: title, onSave: onSave,
+                                                onAutosave: onAutosave, autosaveDelay: autosaveDelay) {
             controllers.removeValue(forKey: sessionID)
             onClose()
         }
@@ -25,17 +29,37 @@ enum EditorWindow {
         NSApp.activate(ignoringOtherApps: true)
         return controller.window!
     }
+
+    static func flushAutosaves() throws {
+        for controller in Array(controllers.values) {
+            do { try controller.flushAutosave() }
+            catch {
+                controller.window?.makeKeyAndOrderFront(nil)
+                throw error
+            }
+        }
+    }
 }
 
 @MainActor
 final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let editingDocument: EditorDocument
     private let onSave: (NSImage) throws -> Void
+    private let onAutosave: ((NSImage) throws -> Void)?
+    private let autosaveDelay: TimeInterval
+    private var savedRevision: Int
+    private var pendingAutosave: DispatchWorkItem?
+    private var revisionSubscription: AnyCancellable?
     private var onClose: (() -> Void)?
 
-    init(document: EditorDocument, title: String, onSave: @escaping (NSImage) throws -> Void, onClose: @escaping () -> Void) {
+    init(document: EditorDocument, title: String, onSave: @escaping (NSImage) throws -> Void,
+         onAutosave: ((NSImage) throws -> Void)? = nil, autosaveDelay: TimeInterval = 0.7,
+         onClose: @escaping () -> Void) {
         self.editingDocument = document
         self.onSave = onSave
+        self.onAutosave = onAutosave
+        self.autosaveDelay = autosaveDelay
+        savedRevision = document.revision
         self.onClose = onClose
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "\(title) — HS Shot"
@@ -50,17 +74,67 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             try self?.completeEditing()
         }))
         window.appearance = NSAppearance(named: .aqua)
+        revisionSubscription = document.$revision.dropFirst().sink { [weak self] _ in self?.scheduleAutosave() }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func completeEditing() throws {
         window?.makeFirstResponder(nil)
         try editingDocument.saveToLibrary(using: onSave)
+        savedRevision = editingDocument.revision
+        pendingAutosave?.cancel()
         close()
+    }
+
+    private func scheduleAutosave() {
+        guard onAutosave != nil else { return }
+        pendingAutosave?.cancel()
+        editingDocument.autosaveStatus = "変更を保存中…"
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            do { try self.autosaveNow() }
+            catch { self.editingDocument.autosaveStatus = "自動保存できません：\(error.localizedDescription)" }
+        }
+        pendingAutosave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + autosaveDelay, execute: work)
+    }
+
+    /// Background autosaves leave the active text input and its undo grouping intact.
+    func autosaveNow() throws {
+        pendingAutosave?.cancel()
+        guard let onAutosave, editingDocument.revision != savedRevision else { return }
+        let revision = editingDocument.revision
+        do {
+            guard let image = editingDocument.autosaveImage() else { throw LibraryError.invalidImage }
+            try onAutosave(image)
+            savedRevision = revision
+            editingDocument.autosaveStatus = "自動保存済み"
+        } catch {
+            editingDocument.autosaveStatus = "自動保存できません：\(error.localizedDescription)"
+            throw error
+        }
+    }
+
+    func flushAutosave() throws {
+        window?.makeFirstResponder(nil)
+        try autosaveNow()
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        do { try flushAutosave(); return true }
+        catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "編集内容を保存できませんでした"
+            alert.informativeText = "編集画面を開いたままにしています。\n\(error.localizedDescription)\n空き容量や保存先を確認して、もう一度閉じてください。"
+            alert.runModal()
+            return false
+        }
     }
     func windowWillClose(_ notification: Notification) {
         // AppKit does not end an active field editor automatically on window close.
         // Preserve the live text in the preview's draft before releasing the UI.
         window?.makeFirstResponder(nil)
+        pendingAutosave?.cancel()
+        revisionSubscription = nil
         let callback = onClose
         onClose = nil
         callback?()
@@ -273,6 +347,8 @@ private struct EditorWorkspace: View {
             Circle().fill(ShotTheme.accent).frame(width: 5, height: 5)
             Text(document.status).lineLimit(1)
             Spacer()
+            Text(document.autosaveStatus).lineLimit(1).help(document.autosaveStatus)
+            Text("・")
             Text("\(document.state.annotations.count) 個の注釈")
             Text("・")
             Text("原本は保持されます")

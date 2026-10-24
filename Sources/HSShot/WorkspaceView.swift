@@ -91,7 +91,7 @@ struct WorkspaceView: View {
                 .background(ShotTheme.panel.opacity(0.55), in: RoundedRectangle(cornerRadius: 10)).padding(16)
             Divider().overlay(ShotTheme.border).padding(.horizontal, 20)
             Button { model.section = .settings } label: {
-                HStack(spacing: 10) { Image(systemName: "slider.horizontal.3"); Text("設定"); Spacer(); Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0").font(.system(size: 10, design: .monospaced)) }
+                HStack(spacing: 10) { Image(systemName: "slider.horizontal.3"); Text("設定"); Spacer(); Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.3.0").font(.system(size: 10, design: .monospaced)) }
                     .foregroundStyle(model.section == .settings ? ShotTheme.accent : ShotTheme.muted).padding(24)
             }.buttonStyle(.plain)
         }.background(ShotTheme.sidebar)
@@ -220,7 +220,12 @@ struct WorkspaceView: View {
 
     private func selectedActions(_ item: CaptureItem) -> some View {
         HStack(spacing: 16) {
-            Text(item.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            HStack {
+                Text(item.title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                if item.isDraft == true {
+                    Text("自動保存").font(.system(size: 9, weight: .medium)).foregroundStyle(ShotTheme.accent)
+                }
+            }
             Spacer()
             if item.kind == .image {
                 Button { model.edit(item) } label: { Label("編集", systemImage: "pencil.tip.crop.circle") }
@@ -300,7 +305,7 @@ private struct CaptureCard: View {
                 Spacer()
                 Text(item.kind == .image ? "\(item.width) × \(item.height)" : "MP4")
             }.font(.system(size: 9)).foregroundStyle(ShotTheme.muted)
-        }.contentShape(Rectangle()).task(id: item.id) {
+        }.contentShape(Rectangle()).task(id: item.filename) {
             thumbnail = await Task.detached(priority: .utility) {
                 if item.kind == .image { return NSImage(contentsOf: url) }
                 let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
@@ -348,7 +353,7 @@ struct SettingsView: View {
                     Text(model.library.root.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted).textSelection(.enabled)
                     HStack { Text("\(model.library.items.count)件 · \(model.totalSize)").font(.system(size: 11)); Spacer(); Button("Finderで開く") { NSWorkspace.shared.open(model.library.root) } }
                 }
-                Text("HS Shot \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2.0") · macOS native\n画像のOCRを含め、すべてMac上で処理します。")
+                Text("HS Shot \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.3.0") · macOS native\n画像のOCRを含め、すべてMac上で処理します。")
                     .font(.system(size: 10)).lineSpacing(5).foregroundStyle(ShotTheme.muted)
             }.padding(30).frame(maxWidth: 850, alignment: .leading)
         }

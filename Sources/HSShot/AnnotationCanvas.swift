@@ -266,6 +266,10 @@ final class EditorDocument: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     @Published var status = "ツールを選んで画像の上をドラッグ"
+    @Published var autosaveStatus = "変更は自動保存されます"
+    @Published private(set) var revision = 0
+    private var liveText: EditorAnnotation?
+    private var liveTextReplacesID: UUID?
     private var undoStates: [EditorSnapshot] = []
     private var redoStates: [EditorSnapshot] = []
     private(set) var preview: CGImage
@@ -300,6 +304,7 @@ final class EditorDocument: ObservableObject {
         redoStates.removeAll()
         body(&state)
         refresh()
+        revision += 1
     }
     func add(_ annotation: EditorAnnotation) {
         change { $0.annotations.append(annotation) }
@@ -387,6 +392,7 @@ final class EditorDocument: ObservableObject {
         state = previous
         if paddingChanged { preferences?.padding = state.padding }
         refresh()
+        revision += 1
     }
     func redo() {
         guard let next = redoStates.popLast() else { return }
@@ -395,6 +401,34 @@ final class EditorDocument: ObservableObject {
         state = next
         if paddingChanged { preferences?.padding = state.padding }
         refresh()
+        revision += 1
+    }
+    /// Include the field editor's current text without ending input or adding undo steps.
+    var autosaveSnapshot: EditorSnapshot {
+        var snapshot = state
+        if let liveText, !liveText.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let id = liveTextReplacesID, let index = snapshot.annotations.firstIndex(where: { $0.id == id }) {
+                snapshot.annotations[index] = liveText
+            } else { snapshot.annotations.append(liveText) }
+        }
+        return snapshot
+    }
+    func setLiveText(_ annotation: EditorAnnotation, replacing id: UUID?) {
+        liveText = annotation
+        liveTextReplacesID = id
+        revision += 1
+    }
+    func clearLiveText() {
+        guard liveText != nil else { return }
+        liveText = nil
+        liveTextReplacesID = nil
+        revision += 1
+    }
+    func autosaveImage() -> NSImage? {
+        let snapshot = autosaveSnapshot
+        guard let rendered = EditorRenderer.render(base: base, annotations: snapshot.annotations, crop: snapshot.crop,
+                                                  padding: snapshot.padding, background: snapshot.background) else { return nil }
+        return NSImage(cgImage: rendered, size: NSSize(width: rendered.width, height: rendered.height))
     }
     func exportedImage() -> NSImage? {
         guard let rendered = EditorRenderer.render(base: base, annotations: state.annotations, crop: state.crop, padding: state.padding, background: state.background) else { return nil }
@@ -422,6 +456,7 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
     private var textEditor: NSTextField?
     private var textPoint: CGPoint?
     private var editingTextID: UUID?
+    private var liveTextAnnotation: EditorAnnotation?
     private var draggedEndpointIndex: Int?
     private var dragOrigin: CGPoint?
     private var dragOffset = CGPoint.zero
@@ -607,6 +642,9 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         textPoint = point
         editingTextID = annotation?.id
         textEditor = field
+        liveTextAnnotation = annotation ?? EditorAnnotation(tool: .text, points: [point], color: document.color,
+                                                            width: document.lineWidth, text: field.stringValue, fontSize: document.fontSize)
+        if annotation == nil, let liveTextAnnotation { document.setLiveText(liveTextAnnotation, replacing: nil) }
         addSubview(field)
         document.status = "テキストを入力：Enter で確定 / Esc で取消"
         window?.makeFirstResponder(field)
@@ -616,17 +654,30 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         guard let field = textEditor, let point = textPoint else { return }
         let text = (field.currentEditor()?.string ?? field.stringValue).trimmingCharacters(in: .whitespacesAndNewlines)
         let existingID = editingTextID
+        let pendingAnnotation = liveTextAnnotation
         textEditor = nil
         textPoint = nil
         editingTextID = nil
+        liveTextAnnotation = nil
+        document.clearLiveText()
         field.delegate = nil
         field.removeFromSuperview()
         if !cancel && !text.isEmpty {
             document.text = text
             if let existingID { document.updateText(text, id: existingID) }
-            else { document.add(EditorAnnotation(tool: .text, points: [point], color: document.color, width: document.lineWidth, text: text, fontSize: document.fontSize)) }
+            else {
+                var annotation = pendingAnnotation ?? EditorAnnotation(tool: .text, points: [point], color: document.color, width: document.lineWidth, fontSize: document.fontSize)
+                annotation.text = text
+                document.add(annotation)
+            }
         }
         needsDisplay = true
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = textEditor, var annotation = liveTextAnnotation else { return }
+        annotation.text = field.currentEditor()?.string ?? field.stringValue
+        liveTextAnnotation = annotation
+        document.setLiveText(annotation, replacing: editingTextID)
     }
     func controlTextDidEndEditing(_ notification: Notification) { commitText() }
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

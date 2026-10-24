@@ -48,7 +48,8 @@ struct CaptureStorageError: LocalizedError {
     var hideWorkspace: () -> Void = {}
     var restoreAfterCapture: (_ includeWorkspace: Bool) -> Void = { _ in }
     var showQuickPanel: (CaptureItem) -> Void = { _ in }
-    var replaceQuickPanel: (UUID, CaptureItem) -> Void = { _, _ in }
+    var previewForEditing: (CaptureItem) -> QuickAccessPreviewState = { QuickAccessPreviewState(item: $0) }
+    var refreshQuickPanels: () -> Void = {}
     var showPin: (NSImage) -> Void = { _ in }
     var showRecordingPanel: () -> Void = {}
     var showScrollPanel: () -> Void = {}
@@ -137,17 +138,27 @@ struct CaptureStorageError: LocalizedError {
         guard item.kind == .image, let image = NSImage(contentsOf: library.url(for: item)) else {
             NSWorkspace.shared.open(library.url(for: item)); return
         }
-        EditorWindow.open(image: image, title: item.title) { [weak self] edited in
-            guard let self else { throw LibraryError.missingFile }
-            try self.saveEditedImage(edited, original: item)
+        let preview = previewForEditing(item)
+        guard let document = preview.prepareDocument(image: image, preferences: EditorPreferences(defaults: .standard)) else {
+            errorMessage = "画像を開けませんでした。読み込める画像は最大 6,400 万ピクセルです。"
+            return
         }
+        preview.isEditing = true
+        refreshQuickPanels()
+        EditorWindow.open(sessionID: preview.sessionID, document: document, title: preview.originalItem.title, onSave: { [weak self] edited in
+            guard let self else { throw LibraryError.missingFile }
+            try self.saveEditedImage(edited, original: preview.originalItem, updating: preview)
+        }, onClose: { [weak self] in
+            preview.isEditing = false
+            self?.refreshQuickPanels()
+        })
     }
 
     @discardableResult
-    func saveEditedImage(_ image: NSImage, original: CaptureItem) throws -> CaptureItem {
+    func saveEditedImage(_ image: NSImage, original: CaptureItem, updating preview: QuickAccessPreviewState? = nil) throws -> CaptureItem {
         let saved = try library.add(image: image, title: "\(original.title) — 編集済み")
         selectedID = saved.id
-        replaceQuickPanel(original.id, saved)
+        preview?.replace(sourceID: original.id, with: saved)
         notify("編集した画像を保存しました")
         return saved
     }

@@ -27,14 +27,10 @@ final class QuickAccessPreviewTests: XCTestCase {
         let original = try library.add(image: image(.white), title: "Original")
         let originalBytes = try Data(contentsOf: library.url(for: original))
         let model = AppModel(library: library)
-        var received: CaptureItem?
-        model.replaceQuickPanel = { source, replacement in
-            XCTAssertEqual(source, original.id)
-            XCTAssertTrue(FileManager.default.fileExists(atPath: library.url(for: replacement).path))
-            received = replacement
-        }
-        let saved = try model.saveEditedImage(image(.blue), original: original)
-        XCTAssertEqual(received?.id, saved.id)
+        let preview = QuickAccessPreviewState(item: original)
+        let saved = try model.saveEditedImage(image(.blue), original: original, updating: preview)
+        XCTAssertEqual(preview.item.id, saved.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: library.url(for: preview.item).path))
         XCTAssertEqual(model.selectedID, saved.id)
         XCTAssertEqual(library.items.count, 2)
         XCTAssertEqual(try Data(contentsOf: library.url(for: original)), originalBytes)
@@ -48,11 +44,12 @@ final class QuickAccessPreviewTests: XCTestCase {
         let library = try LibraryStore(root: root)
         let original = try library.add(image: image(.white), title: "Original")
         let model = AppModel(library: library)
+        let preview = QuickAccessPreviewState(item: original)
         model.selectedID = original.id
-        model.replaceQuickPanel = { _, _ in XCTFail("A failed save must not replace a preview") }
         try FileManager.default.removeItem(at: root.appendingPathComponent("library.json"))
         try FileManager.default.createDirectory(at: root.appendingPathComponent("library.json"), withIntermediateDirectories: false)
-        XCTAssertThrowsError(try model.saveEditedImage(image(.blue), original: original))
+        XCTAssertThrowsError(try model.saveEditedImage(image(.blue), original: original, updating: preview))
+        XCTAssertEqual(preview.item.id, original.id)
         XCTAssertEqual(model.selectedID, original.id)
         XCTAssertEqual(library.items.map(\.id), [original.id])
     }

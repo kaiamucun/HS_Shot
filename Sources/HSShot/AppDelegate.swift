@@ -29,9 +29,12 @@ import Combine
         model.hideWorkspace = { [weak self] in self?.hideForCapture() }
         model.restoreAfterCapture = { [weak self] includeWorkspace in self?.restoreAfterCapture(includeWorkspace: includeWorkspace) }
         model.showQuickPanel = { [weak self] in self?.showQuickAccess($0) }
-        model.replaceQuickPanel = { [weak self] sourceID, replacement in
-            self?.quickPanels.forEach { $0.preview.replace(sourceID: sourceID, with: replacement) }
+        model.previewForEditing = { [weak self] item in
+            guard let self else { return QuickAccessPreviewState(item: item) }
+            if let preview = self.quickPanels.first(where: { $0.preview.represents(item.id) })?.preview { return preview }
+            return self.showQuickAccess(item)
         }
+        model.refreshQuickPanels = { [weak self] in self?.refreshQuickPanels() }
         model.showPin = { [weak self] in self?.pin($0) }
         model.showRecordingPanel = { [weak self] in self?.showActivity(recording: true) }
         model.showScrollPanel = { [weak self] in self?.showActivity(recording: false) }
@@ -97,7 +100,7 @@ import Combine
         guard mainWindow != nil else { return }
         NSApp.unhide(nil); NSApp.activate(ignoringOtherApps: true)
         mainWindow.makeKeyAndOrderFront(nil)
-        quickPanels.forEach { $0.panel.orderFrontRegardless() }
+        refreshQuickPanels()
     }
     private func hideForCapture() {
         // Editors and floating pins are independent AppKit windows. Capture every
@@ -200,8 +203,16 @@ import Combine
         }
     }
 
-    private func showQuickAccess(_ item: CaptureItem) {
-        quickPanels.forEach { $0.panel.orderFrontRegardless() }
+    private func refreshQuickPanels() {
+        for (panel, preview) in quickPanels {
+            if preview.isEditing { panel.orderOut(nil) }
+            else { panel.orderFrontRegardless() }
+        }
+    }
+
+    @discardableResult
+    private func showQuickAccess(_ item: CaptureItem) -> QuickAccessPreviewState {
+        refreshQuickPanels()
         // Keep the newest four previews stacked at the lower-left until explicitly dismissed.
         if quickPanels.count >= 4 { quickPanels.removeFirst().panel.close() }
         let size = QuickAccessGeometry.panelSize(for: CGSize(width: item.width, height: item.height))
@@ -218,6 +229,7 @@ import Combine
         panel.setFrameOrigin(position)
         quickPanels.append((panel, preview))
         panel.orderFrontRegardless()
+        return preview
     }
 
     private func showActivity(recording: Bool) {

@@ -6,29 +6,37 @@ import UniformTypeIdentifiers
 enum EditorWindow {
     private static var controllers: [UUID: EditorWindowController] = [:]
 
-    static func open(image: NSImage, title: String, onSave: @escaping (NSImage) throws -> Void) {
-        guard let document = EditorDocument(image: image, preferences: EditorPreferences(defaults: .standard)) else {
-            let alert = NSAlert()
-            alert.messageText = "画像を開けませんでした"
-            alert.informativeText = "読み込める画像は最大 6,400 万ピクセルです。画像形式とサイズを確認してください。"
-            alert.runModal()
-            return
+    @discardableResult
+    static func open(sessionID: UUID, document: EditorDocument, title: String,
+                     onSave: @escaping (NSImage) throws -> Void, onClose: @escaping () -> Void) -> NSWindow {
+        if let controller = controllers[sessionID], let window = controller.window {
+            window.deminiaturize(nil)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return window
         }
-        let id = UUID()
-        let controller = EditorWindowController(document: document, title: title, onSave: onSave)
-        controller.onClose = { controllers.removeValue(forKey: id) }
-        controllers[id] = controller
+        let controller = EditorWindowController(document: document, title: title, onSave: onSave) {
+            controllers.removeValue(forKey: sessionID)
+            onClose()
+        }
+        controllers[sessionID] = controller
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        return controller.window!
     }
 }
 
 @MainActor
-private final class EditorWindowController: NSWindowController, NSWindowDelegate {
-    var onClose: (() -> Void)?
+final class EditorWindowController: NSWindowController, NSWindowDelegate {
+    private let editingDocument: EditorDocument
+    private let onSave: (NSImage) throws -> Void
+    private var onClose: (() -> Void)?
 
-    init(document: EditorDocument, title: String, onSave: @escaping (NSImage) throws -> Void) {
+    init(document: EditorDocument, title: String, onSave: @escaping (NSImage) throws -> Void, onClose: @escaping () -> Void) {
+        self.editingDocument = document
+        self.onSave = onSave
+        self.onClose = onClose
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 790), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "\(title) — HS Shot"
         window.minSize = NSSize(width: 900, height: 600)
@@ -38,11 +46,21 @@ private final class EditorWindowController: NSWindowController, NSWindowDelegate
         window.center()
         super.init(window: window)
         window.delegate = self
-        window.contentView = NSHostingView(rootView: EditorWorkspace(document: document, imageTitle: title, onSave: onSave))
+        window.contentView = NSHostingView(rootView: EditorWorkspace(document: document, imageTitle: title, onDone: { [weak self] in
+            try self?.completeEditing()
+        }))
         window.appearance = NSAppearance(named: .aqua)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func completeEditing() throws {
+        window?.makeFirstResponder(nil)
+        try editingDocument.saveToLibrary(using: onSave)
+        close()
+    }
     func windowWillClose(_ notification: Notification) {
+        // AppKit does not end an active field editor automatically on window close.
+        // Preserve the live text in the preview's draft before releasing the UI.
+        window?.makeFirstResponder(nil)
         let callback = onClose
         onClose = nil
         callback?()
@@ -53,7 +71,7 @@ private final class EditorWindowController: NSWindowController, NSWindowDelegate
 private struct EditorWorkspace: View {
     @ObservedObject var document: EditorDocument
     let imageTitle: String
-    let onSave: (NSImage) throws -> Void
+    let onDone: () throws -> Void
     @State private var exportJPEG = false
 
     var body: some View {
@@ -99,8 +117,8 @@ private struct EditorWorkspace: View {
                 .keyboardShortcut("c", modifiers: .command)
             Button(action: exportImage) { Label("書き出す", systemImage: "square.and.arrow.up") }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-            Button(action: saveToLibrary) {
-                Label("ライブラリに保存", systemImage: "checkmark")
+            Button(action: finishEditing) {
+                Label("完了", systemImage: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(ShotTheme.onAccent)
                     .padding(.horizontal, 13).padding(.vertical, 8)
@@ -108,6 +126,7 @@ private struct EditorWorkspace: View {
             }
                 .keyboardShortcut("s", modifiers: .command)
                 .buttonStyle(.plain)
+                .help("編集内容を保存して左下のプレビューに戻る ⌘S")
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
@@ -271,10 +290,9 @@ private struct EditorWorkspace: View {
     private var palette: [NSColor] {
         [NSColor(ShotTheme.accent), .systemRed, .systemOrange, .systemBlue, .white, .black]
     }
-    private func saveToLibrary() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
+    private func finishEditing() {
         do {
-            try document.saveToLibrary(using: onSave)
+            try onDone()
         } catch {
             document.status = "ライブラリへの保存に失敗しました"
             showFailure(error.localizedDescription)

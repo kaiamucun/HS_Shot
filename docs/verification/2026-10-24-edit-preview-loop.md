@@ -40,4 +40,17 @@
 
 PKG SHA-256: `ce3ec89a84cc6048149e934662102b2bf77e3b088721f566f1303b618f2c7dd8`。
 
-アプリはアドホック署名、PKGは未署名・未公証。Intel実機と管理者インストールは今回未検証。GitHubとSiteの公開結果は公開後に追記。
+アプリはアドホック署名、PKGは未署名・未公証。Intel実機と管理者インストールは今回未検証。GitHubから公開PKGをダウンロードし、上記SHA-256と実機確認済みPKGのバイト一致を確認。
+
+
+### 公開結果
+
+- GitHub source/tag: `35e67177ef0d43481e9514f44c5e1b3e28bfa757` / `v1.1.1`
+- Release: https://github.com/kaiamucun/HS_Shot/releases/tag/v1.1.1
+- Site: https://hs-shot-download.kaiyamucun526.chatgpt.site （公開閲覧のまま更新）
+- Site source: `87863f4390360b5b18255fb74ec05a6b587d8077`
+- Site saved version: 3 / `appgprj_6adb2dee401481918bc8f74d6cf2297a~appgver_0ff64d8179a88191ba03a9fb56690f4d`
+- Deployment: `appgdep_6adc1d8edc6c8191ae6714c18987b3d7`、succeeded、2026-10-24 02:53:15 UTC
+- 公開ページでv1.1.1の説明・PKGリンク3箇所を確認。画像すべて読み込み成功、動画readyState=4、800px幅で横はみ出しなし。
+- 基本動画は旧画面のガイドを維持。「ライブラリに保存」が「完了」に変わったことをページと台本に追記。
+- 検証で変更した余白設定を元の0pxに戻し、通常ライブラリ17件を新バージョンで表示確認。

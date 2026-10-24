@@ -13,5 +13,5 @@ User-approved behavior: floating preview → editor → Done → same floating p
 - [x] Add regression tests for document reuse, output dimensions, undo, isolation, failed saves and duplicate editor windows.
 - [x] Implement preview/session ownership and Done workflow.
 - [x] Run tests, independent review, build and native capture → edit → Done → re-edit → save checks.
-- [ ] Package v1.1.1, publish GitHub release and update the existing public download Site.
-- [ ] Verify downloaded package hash and public page, document receipts.
+- [x] Package v1.1.1, publish GitHub release and update the existing public download Site.
+- [x] Verify downloaded package hash and public page, document receipts.

@@ -85,3 +85,7 @@
 - Implemented visible-preview replacement after successful editing saves, annotation correction/endpoint/style editing, and persisted editor preferences.
 - Full suite: 57 tests pass. Independent reviews complete. Universal app built and native area capture/edit/preview save/copy plus relaunch preferences verified.
 - Packaged the exact tested app; payload verification passed. GitHub v1.1.0 and public Site version 2 published and verified; details in docs/verification/2026-10-24-editor-workflow.md.
+
+## 2026-10-24 — v1.1.1 プレビューと編集の往復
+
+完了→同じ固定プレビュー→注釈を保持して再編集する動きを実装。64テスト成功、範囲撮影・文字/矢印の再編集・未確定入力保持・PNG書き出しを実機確認。GitHub v1.1.1 PKGを公開し、公開ダウンロードのSHA-256を照合。既存の公開Siteをversion 3へ更新、通常ライブラリに復帰。詳細は docs/verification/2026-10-24-edit-preview-loop.md。

@@ -25,7 +25,7 @@ final class EditPreviewLoopTests: XCTestCase {
         document.setPadding(12)
         document.select(arrow.id)
         document.moveSelectedEndpoint(1, to: CGPoint(x: 85, y: 65))
-        try document.saveToLibrary { try model.saveEditedImage($0, original: original, updating: preview) }
+        try document.saveToLibrary { try model.saveEditedImage($0, original: original, document: document, updating: preview) }
         let firstSaved = preview.item
         let firstPNG = try Data(contentsOf: library.url(for: firstSaved))
         let flattened = try XCTUnwrap(NSImage(contentsOf: library.url(for: firstSaved)))
@@ -50,7 +50,7 @@ final class EditPreviewLoopTests: XCTestCase {
         XCTAssertEqual(reopened.state.annotations.last?.points.last, CGPoint(x: 70, y: 60))
         reopened.redo()
         XCTAssertEqual(reopened.state.annotations.last?.points.last, CGPoint(x: 85, y: 65))
-        try reopened.saveToLibrary { try model.saveEditedImage($0, original: firstSaved, updating: preview) }
+        try reopened.saveToLibrary { try model.saveEditedImage($0, original: firstSaved, document: reopened, updating: preview) }
         let unchangedPNG = try Data(contentsOf: library.url(for: preview.item))
         XCTAssertEqual(unchangedPNG, firstPNG)
         let unchangedBitmap = try XCTUnwrap(NSBitmapImageRep(data: unchangedPNG))
@@ -64,7 +64,7 @@ final class EditPreviewLoopTests: XCTestCase {
         XCTAssertEqual(reopened.state.annotations.first?.text, "修正前")
         reopened.redo()
         let secondSaved = preview.item
-        try reopened.saveToLibrary { try model.saveEditedImage($0, original: secondSaved, updating: preview) }
+        try reopened.saveToLibrary { try model.saveEditedImage($0, original: secondSaved, document: reopened, updating: preview) }
         XCTAssertTrue(preview.represents(secondSaved.id))
         XCTAssertNotEqual(try Data(contentsOf: library.url(for: preview.item)), firstPNG)
         XCTAssertEqual(try Data(contentsOf: library.url(for: original)), originalBytes)
@@ -111,7 +111,7 @@ final class EditPreviewLoopTests: XCTestCase {
         let newDraft = try XCTUnwrap(newDocument.exportedImage()?.tiffRepresentation)
 
         let oldSaved = try model.saveEditedImage(try XCTUnwrap(oldDocument.exportedImage()),
-                                                original: original, updating: oldPreview)
+                                                original: original, document: oldDocument, updating: oldPreview)
 
         XCTAssertNotEqual(oldPreview.sessionID, newPreview.sessionID)
         XCTAssertEqual(oldPreview.item.id, oldSaved.id)
@@ -126,7 +126,7 @@ final class EditPreviewLoopTests: XCTestCase {
         XCTAssertTrue(newDocument.canUndo)
 
         let newSaved = try model.saveEditedImage(try XCTUnwrap(newDocument.exportedImage()),
-                                                original: original, updating: newPreview)
+                                                original: original, document: newDocument, updating: newPreview)
         XCTAssertEqual(newPreview.item.id, newSaved.id)
         XCTAssertEqual(oldPreview.item.id, oldSaved.id)
         XCTAssertFalse(oldPreview.represents(newSaved.id))
@@ -213,7 +213,7 @@ final class EditPreviewLoopTests: XCTestCase {
         model.selectedID = original.id
         var closeCount = 0
         let controller = EditorWindowController(document: document, title: "Retry", onSave: { image in
-            try model.saveEditedImage(image, original: original, updating: preview)
+            try model.saveEditedImage(image, original: original, document: document, updating: preview)
         }, onClose: { closeCount += 1 })
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }

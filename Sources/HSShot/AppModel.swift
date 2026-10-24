@@ -135,19 +135,18 @@ struct CaptureStorageError: LocalizedError {
     }
 
     func edit(_ item: CaptureItem) {
-        guard item.kind == .image, let image = NSImage(contentsOf: library.url(for: item)) else {
+        guard item.kind == .image else {
             NSWorkspace.shared.open(library.url(for: item)); return
         }
         let preview = previewForEditing(item)
-        guard let document = preview.prepareDocument(image: image, preferences: EditorPreferences(defaults: .standard)) else {
-            errorMessage = "画像を開けませんでした。読み込める画像は最大 6,400 万ピクセルです。"
-            return
-        }
+        let document: EditorDocument
+        do { document = try preview.prepareDocument(using: library, preferences: EditorPreferences(defaults: .standard)) }
+        catch { showWorkspace(); fail(error); return }
         preview.isEditing = true
         refreshQuickPanels()
         EditorWindow.open(sessionID: preview.sessionID, document: document, title: preview.originalItem.title, onSave: { [weak self] edited in
             guard let self else { throw LibraryError.missingFile }
-            try self.saveEditedImage(edited, original: preview.originalItem, updating: preview)
+            try self.saveEditedImage(edited, original: preview.originalItem, document: document, updating: preview)
         }, onClose: { [weak self] in
             preview.isEditing = false
             self?.refreshQuickPanels()
@@ -155,8 +154,11 @@ struct CaptureStorageError: LocalizedError {
     }
 
     @discardableResult
-    func saveEditedImage(_ image: NSImage, original: CaptureItem, updating preview: QuickAccessPreviewState? = nil) throws -> CaptureItem {
-        let saved = try library.add(image: image, title: "\(original.title) — 編集済み")
+    func saveEditedImage(_ image: NSImage, original: CaptureItem, document: EditorDocument,
+                         updating preview: QuickAccessPreviewState? = nil) throws -> CaptureItem {
+        let sourceTitle = preview?.sourceTitle ?? original.title
+        let project = try EditorProject(document: document, sourceTitle: sourceTitle)
+        let saved = try library.add(image: image, project: project, title: "\(sourceTitle) — 編集済み")
         selectedID = saved.id
         preview?.replace(sourceID: original.id, with: saved)
         notify("編集した画像を保存しました")

@@ -31,7 +31,7 @@ import Combine
         model.showQuickPanel = { [weak self] in self?.showQuickAccess($0) }
         model.previewForEditing = { [weak self] item in
             guard let self else { return QuickAccessPreviewState(item: item) }
-            if let preview = self.quickPanels.first(where: { $0.preview.represents(item.id) })?.preview { return preview }
+            if let preview = self.quickPanels.first(where: { $0.preview.canResume(item) })?.preview { return preview }
             return self.showQuickAccess(item)
         }
         model.refreshQuickPanels = { [weak self] in self?.refreshQuickPanels() }

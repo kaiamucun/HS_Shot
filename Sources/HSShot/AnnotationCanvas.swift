@@ -53,7 +53,7 @@ enum EditorBackground: String, CaseIterable, Identifiable {
 }
 
 struct EditorAnnotation: Identifiable {
-    let id = UUID()
+    var id = UUID()
     var tool: EditorTool
     var points: [CGPoint]
     var color: NSColor
@@ -271,7 +271,7 @@ final class EditorDocument: ObservableObject {
     private(set) var preview: CGImage
     private let preferences: EditorPreferences?
 
-    init?(image: NSImage, preferences: EditorPreferences? = nil) {
+    init?(image: NSImage, preferences: EditorPreferences? = nil, restoredState: EditorSnapshot? = nil) {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
               cgImage.width <= 32_768, cgImage.height <= 32_768,
               Int64(cgImage.width) * Int64(cgImage.height) <= 64_000_000 else { return nil }
@@ -283,6 +283,11 @@ final class EditorDocument: ObservableObject {
             lineWidth = preferences.lineWidth
             fontSize = preferences.fontSize
             state.padding = preferences.padding
+        }
+        if let restoredState {
+            state = restoredState
+            refresh()
+            status = "保存した編集を再開しました。文字や矢印を選んで調整できます"
         }
     }
     var dimensions: String {

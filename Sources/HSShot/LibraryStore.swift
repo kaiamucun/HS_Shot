@@ -14,6 +14,7 @@ struct CaptureItem: Identifiable, Codable, Hashable {
     let height: Int
     let byteCount: Int64
     var isFavorite: Bool
+    var editableProjectVersion: Int? = nil
 }
 
 enum LibraryError: LocalizedError {
@@ -53,12 +54,64 @@ final class LibraryStore: ObservableObject {
 
     func url(for item: CaptureItem) -> URL { root.appendingPathComponent(item.filename) }
 
+    func editableProjectURL(for item: CaptureItem) -> URL {
+        root.appendingPathComponent("\(item.id.uuidString).hsedit.json")
+    }
+
+    /// A missing marker means a legacy flat image. Marked but broken projects must never
+    /// silently reopen the flattened PNG and lose their original editable annotations.
+    func editableProject(for item: CaptureItem) throws -> EditorProject? {
+        guard let version = item.editableProjectVersion else { return nil }
+        guard version == EditorProject.currentSchemaVersion else {
+            if version > EditorProject.currentSchemaVersion { throw EditorProjectError.unsupportedVersion(version) }
+            throw EditorProjectError.invalidData
+        }
+        guard item.kind == .image else { throw EditorProjectError.invalidData }
+        let projectURL = editableProjectURL(for: item)
+        guard FileManager.default.fileExists(atPath: projectURL.path) else { throw EditorProjectError.missingData }
+        do {
+            let attributes = try projectURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+            guard attributes.isRegularFile == true, attributes.isSymbolicLink != true,
+                  let byteCount = attributes.fileSize, byteCount <= EditorProject.maximumFileBytes else {
+                throw EditorProjectError.invalidData
+            }
+            let data = try Data(contentsOf: projectURL)
+            // Read the version before decoding the schema, so newer layouts receive the right message.
+            struct Header: Decodable { let schemaVersion: Int }
+            let header = try JSONDecoder().decode(Header.self, from: data)
+            guard header.schemaVersion == EditorProject.currentSchemaVersion else {
+                if header.schemaVersion > EditorProject.currentSchemaVersion {
+                    throw EditorProjectError.unsupportedVersion(header.schemaVersion)
+                }
+                throw EditorProjectError.invalidData
+            }
+            let project = try JSONDecoder().decode(EditorProject.self, from: data)
+            try project.validate()
+            return project
+        } catch let error as EditorProjectError { throw error }
+          catch { throw EditorProjectError.invalidData }
+    }
+
     @discardableResult func add(image: NSImage, title: String) throws -> CaptureItem {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
               let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
             throw LibraryError.invalidImage
         }
         return try persist(data: data, ext: "png", kind: .image, title: title, width: cg.width, height: cg.height)
+    }
+
+    @discardableResult func add(image: NSImage, project: EditorProject, title: String) throws -> CaptureItem {
+        try project.validate()
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {
+            throw LibraryError.invalidImage
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let projectData = try encoder.encode(project)
+        guard projectData.count <= EditorProject.maximumFileBytes else { throw EditorProjectError.invalidData }
+        return try persist(data: data, ext: "png", kind: .image, title: title, width: cg.width, height: cg.height,
+                           projectData: projectData)
     }
 
     @discardableResult func add(file: URL, title: String? = nil) throws -> CaptureItem {
@@ -79,14 +132,25 @@ final class LibraryStore: ObservableObject {
         return try add(image: image, title: name)
     }
 
-    private func persist(data: Data, ext: String, kind: MediaKind, title: String, width: Int, height: Int) throws -> CaptureItem {
+    private func persist(data: Data, ext: String, kind: MediaKind, title: String, width: Int, height: Int,
+                         projectData: Data? = nil) throws -> CaptureItem {
         let id = UUID()
         let filename = "\(id.uuidString).\(ext)"
         let destination = root.appendingPathComponent(filename)
-        try data.write(to: destination, options: .atomic)
         let item = CaptureItem(id: id, title: title, filename: filename, kind: kind, createdAt: Date(),
-            width: width, height: height, byteCount: Int64(data.count), isFavorite: false)
-        do { try commit([item] + items) } catch { try? FileManager.default.removeItem(at: destination); throw error }
+            width: width, height: height, byteCount: Int64(data.count) + Int64(projectData?.count ?? 0), isFavorite: false,
+            editableProjectVersion: projectData == nil ? nil : EditorProject.currentSchemaVersion)
+        let projectURL = editableProjectURL(for: item)
+        do {
+            try data.write(to: destination, options: .atomic)
+            if let projectData { try projectData.write(to: projectURL, options: .atomic) }
+            // Publish the new item only once both complete files exist.
+            try commit([item] + items)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            if projectData != nil { try? FileManager.default.removeItem(at: projectURL) }
+            throw error
+        }
         return item
     }
 
@@ -112,6 +176,10 @@ final class LibraryStore: ObservableObject {
         try commit(items.filter { $0.id != id })
         if FileManager.default.fileExists(atPath: url(for: item).path) {
             try FileManager.default.removeItem(at: url(for: item))
+        }
+        if item.editableProjectVersion != nil,
+           FileManager.default.fileExists(atPath: editableProjectURL(for: item).path) {
+            try FileManager.default.removeItem(at: editableProjectURL(for: item))
         }
     }
 

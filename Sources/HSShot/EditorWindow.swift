@@ -7,7 +7,7 @@ enum EditorWindow {
     private static var controllers: [UUID: EditorWindowController] = [:]
 
     static func open(image: NSImage, title: String, onSave: @escaping (NSImage) throws -> Void) {
-        guard let document = EditorDocument(image: image) else {
+        guard let document = EditorDocument(image: image, preferences: EditorPreferences(defaults: .standard)) else {
             let alert = NSAlert()
             alert.messageText = "画像を開けませんでした"
             alert.informativeText = "読み込める画像は最大 6,400 万ピクセルです。画像形式とサイズを確認してください。"
@@ -121,7 +121,8 @@ private struct EditorWorkspace: View {
             ForEach(EditorTool.allCases) { tool in
                 Button {
                     document.tool = tool
-                    document.status = tool == .select ? "注釈をクリックして選択 / ドラッグで移動 / Delete で削除" : tool == .text ? "画像をクリックして入力。Enter で確定 / Esc で取消" : tool == .number ? "画像をクリックして連番を配置" : "\(tool.title)：画像の上をドラッグ"
+                    if tool != .select { document.select(nil) }
+                    document.status = tool == .select ? "注釈をクリックして選択 / 文字はダブルクリックで修正 / 矢印・線は両端を調整" : tool == .text ? "画像をクリックして入力。Enter で確定 / Esc で取消" : tool == .number ? "画像をクリックして連番を配置" : "\(tool.title)：画像の上をドラッグ"
                 } label: {
                     Image(systemName: tool.symbol)
                         .font(.system(size: 17, weight: .medium))
@@ -141,36 +142,57 @@ private struct EditorWorkspace: View {
         .background(ShotTheme.sidebar)
     }
 
+    private var inspectorTool: EditorTool { document.selectedAnnotation?.tool ?? document.tool }
     private var inspector: some View {
+        ScrollView {
+            inspectorContent
+        }
+        .frame(width: 234)
+        .frame(maxHeight: .infinity)
+        .background(ShotTheme.panel)
+    }
+    private var inspectorContent: some View {
         VStack(alignment: .leading, spacing: 23) {
             VStack(alignment: .leading, spacing: 7) {
-                Text("編集ツール").font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(ShotTheme.muted)
-                Label(document.tool.title, systemImage: document.tool.symbol).font(.system(size: 18, weight: .semibold))
+                Text(document.selectedAnnotationID == nil ? "編集ツール" : "選択した注釈").font(.system(size: 10, weight: .semibold)).tracking(1.5).foregroundStyle(ShotTheme.muted)
+                Label(inspectorTool.title, systemImage: inspectorTool.symbol).font(.system(size: 18, weight: .semibold))
             }
             Divider().overlay(ShotTheme.border)
             VStack(alignment: .leading, spacing: 12) {
                 inspectorLabel("スタイル")
-                ColorPicker("カラー", selection: Binding(get: { Color(nsColor: document.color) }, set: { document.color = NSColor($0) }), supportsOpacity: false)
-                    .font(.system(size: 12))
-                HStack(spacing: 9) {
-                    ForEach(Array(palette.enumerated()), id: \.offset) { _, color in
-                        Button { document.color = color } label: {
-                            Circle().fill(Color(nsColor: color)).frame(width: 21, height: 21)
-                                .overlay(Circle().stroke(ShotTheme.border, lineWidth: 1))
-                                .overlay(Circle().stroke(document.color.isEqual(color) ? ShotTheme.accent : .clear, lineWidth: 2).padding(-3))
-                        }.buttonStyle(.plain).accessibilityLabel("注釈カラー")
+                if ![EditorTool.redact, .pixelate, .crop].contains(inspectorTool) {
+                    ColorPicker("カラー", selection: Binding(get: { Color(nsColor: document.inspectorColor) }, set: { document.setColor(NSColor($0)) }), supportsOpacity: false)
+                        .font(.system(size: 12))
+                    HStack(spacing: 9) {
+                        ForEach(Array(palette.enumerated()), id: \.offset) { _, color in
+                            Button { document.setColor(color) } label: {
+                                Circle().fill(Color(nsColor: color)).frame(width: 21, height: 21)
+                                    .overlay(Circle().stroke(ShotTheme.border, lineWidth: 1))
+                                    .overlay(Circle().stroke(document.inspectorColor.isEqual(color) ? ShotTheme.accent : .clear, lineWidth: 2).padding(-3))
+                            }.buttonStyle(.plain).accessibilityLabel("注釈カラー")
+                        }
                     }
                 }
-                HStack {
-                    Text("線の太さ").font(.system(size: 12))
-                    Spacer()
-                    Text("\(Int(document.lineWidth)) px").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted)
-                }.padding(.top, 8)
-                Slider(value: $document.lineWidth, in: 1...20, step: 1)
+                if ![EditorTool.text, .number, .highlight, .redact, .pixelate, .crop].contains(inspectorTool) {
+                    HStack {
+                        Text("線の太さ").font(.system(size: 12))
+                        Spacer()
+                        Text("\(Int(document.inspectorLineWidth)) px").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted)
+                    }.padding(.top, 8)
+                    Slider(value: Binding(get: { document.inspectorLineWidth }, set: document.setLineWidth), in: 1...20, step: 1)
+                }
+                if [.text, .number].contains(inspectorTool) || (document.tool == .select && document.selectedAnnotationID == nil) {
+                    HStack {
+                        Text("文字サイズ").font(.system(size: 12))
+                        Spacer()
+                        Text("\(Int(document.inspectorFontSize)) px").font(.system(size: 11, design: .monospaced)).foregroundStyle(ShotTheme.muted)
+                    }
+                    Slider(value: Binding(get: { document.inspectorFontSize }, set: document.setFontSize), in: 12...160, step: 1)
+                }
             }
             if document.tool == .select {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("クリックで選択、ドラッグで移動。Delete で削除できます。")
+                    Text(document.selectedAnnotation.map(AnnotationCanvas.selectionHelp) ?? "クリックで選択、ドラッグで移動。文字はダブルクリックで修正、矢印・線は両端の丸で調整できます。")
                         .font(.system(size: 11)).foregroundStyle(ShotTheme.muted)
                     if document.selectedAnnotationID != nil {
                         Button(role: .destructive, action: document.removeSelected) {
@@ -187,8 +209,8 @@ private struct EditorWorkspace: View {
                     Text("画像をクリック → 入力 → Enter で確定").font(.system(size: 10)).foregroundStyle(ShotTheme.muted)
                 }
             }
-            if document.tool == .redact || document.tool == .pixelate {
-                Text(document.tool == .redact ? "秘匿範囲は不透明な黒で塗りつぶします。共有前に出力画像をご確認ください。" : "ピクセル化は装飾用です。機密情報には「塗りつぶし秘匿」を使用してください。")
+            if inspectorTool == .redact || inspectorTool == .pixelate {
+                Text(inspectorTool == .redact ? "秘匿範囲は不透明な黒で塗りつぶします。共有前に出力画像をご確認ください。" : "ピクセル化は装飾用です。機密情報には「塗りつぶし秘匿」を使用してください。")
                     .font(.system(size: 11)).foregroundStyle(ShotTheme.muted).fixedSize(horizontal: false, vertical: true)
             }
             Divider().overlay(ShotTheme.border)
@@ -200,8 +222,8 @@ private struct EditorWorkspace: View {
                 HStack {
                     Text("余白").font(.system(size: 12))
                     Spacer()
-                    Picker("余白", selection: Binding(get: { document.state.padding }, set: { value in document.change { $0.padding = value } })) {
-                        ForEach([0, 16, 32, 64, 96, 128], id: \.self) { Text("\($0) px").tag($0) }
+                    Picker("余白", selection: Binding(get: { document.state.padding }, set: document.setPadding)) {
+                        ForEach(Array(Set([0, 16, 32, 64, 96, 128, document.state.padding])).sorted(), id: \.self) { Text("\($0) px").tag($0) }
                     }.labelsHidden().frame(width: 96)
                 }
                 if document.state.crop != nil {
@@ -224,9 +246,7 @@ private struct EditorWorkspace: View {
             }
         }
         .padding(22)
-        .frame(width: 234)
-        .frame(maxHeight: .infinity)
-        .background(ShotTheme.panel)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var footer: some View {

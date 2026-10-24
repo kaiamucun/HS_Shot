@@ -48,6 +48,7 @@ struct CaptureStorageError: LocalizedError {
     var hideWorkspace: () -> Void = {}
     var restoreAfterCapture: (_ includeWorkspace: Bool) -> Void = { _ in }
     var showQuickPanel: (CaptureItem) -> Void = { _ in }
+    var replaceQuickPanel: (UUID, CaptureItem) -> Void = { _, _ in }
     var showPin: (NSImage) -> Void = { _ in }
     var showRecordingPanel: () -> Void = {}
     var showScrollPanel: () -> Void = {}
@@ -138,10 +139,17 @@ struct CaptureStorageError: LocalizedError {
         }
         EditorWindow.open(image: image, title: item.title) { [weak self] edited in
             guard let self else { throw LibraryError.missingFile }
-            let saved = try self.library.add(image: edited, title: "\(item.title) — 編集済み")
-            self.selectedID = saved.id
-            self.notify("編集した画像を保存しました")
+            try self.saveEditedImage(edited, original: item)
         }
+    }
+
+    @discardableResult
+    func saveEditedImage(_ image: NSImage, original: CaptureItem) throws -> CaptureItem {
+        let saved = try library.add(image: image, title: "\(original.title) — 編集済み")
+        selectedID = saved.id
+        replaceQuickPanel(original.id, saved)
+        notify("編集した画像を保存しました")
+        return saved
     }
 
     func copy(_ item: CaptureItem, feedback: Bool = true) {

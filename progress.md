@@ -80,3 +80,8 @@
 - 公開サイトから再ダウンロードしたMP4をffmpegで全編デコードし、終了コード0を確認。
 - HS Shotを通常起動し、ライブラリ11件を確認。サイトと動画の公開後もアプリが起動できることを確認した。
 - 独立したソースレビューで、ローカル素材参照、内部アンカー、JS構文、字幕12区間、配布リンクに致命的な問題なし。詳細は `docs/verification/2026-10-23-download-site.md`。
+
+## 2026-10-24 — 1.1.0 editor workflow
+- Implemented visible-preview replacement after successful editing saves, annotation correction/endpoint/style editing, and persisted editor preferences.
+- Full suite: 57 tests pass. Independent reviews complete. Universal app built and native area capture/edit/preview save/copy plus relaunch preferences verified.
+- Packaged the exact tested app; payload verification passed. Publication in progress; details in docs/verification/2026-10-24-editor-workflow.md.

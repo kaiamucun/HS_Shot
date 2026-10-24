@@ -7,7 +7,7 @@ import Combine
     private(set) var model: AppModel!
     private var mainWindow: NSWindow!
     private var statusItem: NSStatusItem!
-    private var quickPanels: [NSPanel] = []
+    private var quickPanels: [(panel: NSPanel, preview: QuickAccessPreviewState)] = []
     private var pins: [NSWindow] = []
     private var activityPanel: NSPanel?
     private var captureHiddenWindows: [NSWindow] = []
@@ -29,6 +29,9 @@ import Combine
         model.hideWorkspace = { [weak self] in self?.hideForCapture() }
         model.restoreAfterCapture = { [weak self] includeWorkspace in self?.restoreAfterCapture(includeWorkspace: includeWorkspace) }
         model.showQuickPanel = { [weak self] in self?.showQuickAccess($0) }
+        model.replaceQuickPanel = { [weak self] sourceID, replacement in
+            self?.quickPanels.forEach { $0.preview.replace(sourceID: sourceID, with: replacement) }
+        }
         model.showPin = { [weak self] in self?.pin($0) }
         model.showRecordingPanel = { [weak self] in self?.showActivity(recording: true) }
         model.showScrollPanel = { [weak self] in self?.showActivity(recording: false) }
@@ -94,7 +97,7 @@ import Combine
         guard mainWindow != nil else { return }
         NSApp.unhide(nil); NSApp.activate(ignoringOtherApps: true)
         mainWindow.makeKeyAndOrderFront(nil)
-        quickPanels.forEach { $0.orderFrontRegardless() }
+        quickPanels.forEach { $0.panel.orderFrontRegardless() }
     }
     private func hideForCapture() {
         // Editors and floating pins are independent AppKit windows. Capture every
@@ -198,21 +201,22 @@ import Combine
     }
 
     private func showQuickAccess(_ item: CaptureItem) {
-        quickPanels.forEach { $0.orderFrontRegardless() }
+        quickPanels.forEach { $0.panel.orderFrontRegardless() }
         // Keep the newest four previews stacked at the lower-left until explicitly dismissed.
-        if quickPanels.count >= 4 { quickPanels.removeFirst().close() }
+        if quickPanels.count >= 4 { quickPanels.removeFirst().panel.close() }
         let size = QuickAccessGeometry.panelSize(for: CGSize(width: item.width, height: item.height))
         let panel = makePanel(width: size.width, height: size.height)
         panel.isMovableByWindowBackground = true
-        panel.contentView = NSHostingView(rootView: QuickAccessView(model: model, item: item, size: size) { [weak self, weak panel] in
-            guard let panel else { return }; panel.close(); self?.quickPanels.removeAll { $0 === panel }
+        let preview = QuickAccessPreviewState(item: item)
+        panel.contentView = NSHostingView(rootView: QuickAccessView(model: model, preview: preview, size: size) { [weak self, weak panel] in
+            guard let panel else { return }; panel.close(); self?.quickPanels.removeAll { $0.panel === panel }
         })
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let position = NSPoint(x: visible.minX + 20 + CGFloat(quickPanels.count) * 18,
             y: visible.minY + 20 + CGFloat(quickPanels.count) * 24)
         panel.setFrameOrigin(position)
-        quickPanels.append(panel)
+        quickPanels.append((panel, preview))
         panel.orderFrontRegardless()
     }
 
@@ -270,7 +274,8 @@ import Combine
 
 private struct QuickAccessView: View {
     @ObservedObject var model: AppModel
-    let item: CaptureItem
+    @ObservedObject var preview: QuickAccessPreviewState
+    private var item: CaptureItem { preview.item }
     let size: CGSize
     let close: () -> Void
     @State private var hovering = false

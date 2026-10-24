@@ -59,6 +59,7 @@ struct EditorAnnotation: Identifiable {
     var color: NSColor
     var width: CGFloat
     var text = ""
+    var fontSize: CGFloat = 35
     var rect: CGRect {
         guard let first = points.first, let last = points.last else { return .zero }
         return CGRect(x: min(first.x, last.x), y: min(first.y, last.y), width: abs(last.x - first.x), height: abs(last.y - first.y))
@@ -95,7 +96,7 @@ extension EditorTool {
 extension EditorAnnotation {
     var selectionBounds: CGRect {
         guard let point = points.first else { return .zero }
-        let fontSize = max(18, width * 5 + 10)
+        let fontSize = EditorPreferences.validFontSize(fontSize)
         if tool == .text {
             let size = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: fontSize, weight: .bold)])
             return CGRect(origin: point, size: CGSize(width: max(1, size.width), height: max(1, size.height)))
@@ -224,7 +225,7 @@ enum EditorRenderer {
                 context.draw(mosaic, in: rect)
             }
         case .text, .number:
-            let fontSize = max(18, annotation.width * 5 + 10)
+            let fontSize = EditorPreferences.validFontSize(annotation.fontSize)
             if annotation.tool == .number {
                 let radius = max(16, fontSize * 0.7)
                 context.fillEllipse(in: CGRect(x: first.x - radius, y: first.y - radius, width: radius * 2, height: radius * 2))
@@ -257,8 +258,9 @@ final class EditorDocument: ObservableObject {
     let base: CGImage
     @Published private(set) var selectedAnnotationID: UUID?
     @Published var tool: EditorTool = .select
-    @Published var color: NSColor = NSColor(ShotTheme.accent)
-    @Published var lineWidth: CGFloat = 5
+    @Published private(set) var color: NSColor = NSColor(ShotTheme.accent)
+    @Published private(set) var lineWidth: CGFloat = 5
+    @Published private(set) var fontSize: CGFloat = 35
     @Published var text = "テキスト"
     @Published private(set) var state = EditorSnapshot()
     @Published private(set) var canUndo = false
@@ -267,13 +269,21 @@ final class EditorDocument: ObservableObject {
     private var undoStates: [EditorSnapshot] = []
     private var redoStates: [EditorSnapshot] = []
     private(set) var preview: CGImage
+    private let preferences: EditorPreferences?
 
-    init?(image: NSImage) {
+    init?(image: NSImage, preferences: EditorPreferences? = nil) {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
               cgImage.width <= 32_768, cgImage.height <= 32_768,
               Int64(cgImage.width) * Int64(cgImage.height) <= 64_000_000 else { return nil }
         base = cgImage
         preview = cgImage
+        self.preferences = preferences
+        if let preferences {
+            color = preferences.color
+            lineWidth = preferences.lineWidth
+            fontSize = preferences.fontSize
+            state.padding = preferences.padding
+        }
     }
     var dimensions: String {
         let size = state.crop?.size ?? CGSize(width: base.width, height: base.height)
@@ -297,6 +307,55 @@ final class EditorDocument: ObservableObject {
         status = "切り抜き範囲を設定しました。書き出し時に適用されます"
     }
     func select(_ id: UUID?) { selectedAnnotationID = id }
+    var inspectorColor: NSColor { selectedAnnotation?.color ?? color }
+    var inspectorLineWidth: CGFloat { selectedAnnotation?.width ?? lineWidth }
+    var inspectorFontSize: CGFloat { selectedAnnotation?.fontSize ?? fontSize }
+    func setColor(_ value: NSColor) {
+        color = value
+        preferences?.color = value
+        guard let selected = selectedAnnotation, !selected.color.isEqual(value) else { return }
+        updateSelected { $0.color = value }
+    }
+    func setLineWidth(_ value: CGFloat) {
+        let value = EditorPreferences.validLineWidth(value)
+        lineWidth = value
+        preferences?.lineWidth = value
+        guard let selected = selectedAnnotation, selected.width != value else { return }
+        updateSelected { $0.width = value }
+    }
+    func setFontSize(_ value: CGFloat) {
+        let value = EditorPreferences.validFontSize(value)
+        fontSize = value
+        preferences?.fontSize = value
+        guard let selected = selectedAnnotation, [.text, .number].contains(selected.tool), selected.fontSize != value else { return }
+        updateSelected { $0.fontSize = value }
+    }
+    func setPadding(_ value: Int) {
+        let value = max(0, min(1024, value))
+        preferences?.padding = value
+        guard state.padding != value else { return }
+        change { $0.padding = value }
+    }
+    private func updateSelected(_ body: (inout EditorAnnotation) -> Void) {
+        guard let index = state.annotations.firstIndex(where: { $0.id == selectedAnnotationID }) else { return }
+        change { body(&$0.annotations[index]) }
+        status = "選択した注釈のスタイルを変更しました。⌘Z で元に戻せます"
+    }
+    func updateText(_ text: String, id: UUID) {
+        guard !text.isEmpty, let index = state.annotations.firstIndex(where: { $0.id == id && $0.tool == .text }),
+              state.annotations[index].text != text else { return }
+        change { $0.annotations[index].text = text }
+        status = "テキストを修正しました。⌘Z で元に戻せます"
+    }
+    func moveSelectedEndpoint(_ index: Int, to point: CGPoint) {
+        guard let selected = selectedAnnotation, [.arrow, .line].contains(selected.tool), selected.points.count == 2,
+              (0...1).contains(index), point.x.isFinite, point.y.isFinite else { return }
+        let point = CGPoint(x: max(0, min(CGFloat(base.width), point.x)), y: max(0, min(CGFloat(base.height), point.y)))
+        let other = selected.points[1 - index]
+        guard hypot(point.x - other.x, point.y - other.y) >= 1, point != selected.points[index] else { return }
+        updateSelected { $0.points[index] = point }
+        status = "端点を調整しました。⌘Z で元に戻せます"
+    }
     func moveSelected(by offset: CGPoint) {
         guard let id = selectedAnnotationID, let index = state.annotations.firstIndex(where: { $0.id == id }),
               abs(offset.x) > 0.01 || abs(offset.y) > 0.01 else { return }
@@ -319,13 +378,17 @@ final class EditorDocument: ObservableObject {
     func undo() {
         guard let previous = undoStates.popLast() else { return }
         redoStates.append(state)
+        let paddingChanged = state.padding != previous.padding
         state = previous
+        if paddingChanged { preferences?.padding = state.padding }
         refresh()
     }
     func redo() {
         guard let next = redoStates.popLast() else { return }
         undoStates.append(state)
+        let paddingChanged = state.padding != next.padding
         state = next
+        if paddingChanged { preferences?.padding = state.padding }
         refresh()
     }
     func exportedImage() -> NSImage? {
@@ -353,6 +416,8 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
     private var draft: EditorAnnotation?
     private var textEditor: NSTextField?
     private var textPoint: CGPoint?
+    private var editingTextID: UUID?
+    private var draggedEndpointIndex: Int?
     private var dragOrigin: CGPoint?
     private var dragOffset = CGPoint.zero
     private var draggedAnnotation: EditorAnnotation?
@@ -395,18 +460,25 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         context.translateBy(x: rect.minX, y: rect.minY)
         context.scaleBy(x: scale, y: scale)
         context.clip(to: CGRect(x: 0, y: 0, width: document.base.width, height: document.base.height))
-        if var dragged = draggedAnnotation, movePreview != nil {
-            dragged.points = dragged.points.map { CGPoint(x: $0.x + dragOffset.x, y: $0.y + dragOffset.y) }
+        if let dragged = draggedPreviewAnnotation, movePreview != nil {
             EditorRenderer.draw(dragged, in: context, base: document.base)
         }
         if let draft, draft.tool != .crop { EditorRenderer.draw(draft, in: context, base: document.base) }
         if var selected = document.selectedAnnotation, document.tool == .select {
-            if draggedAnnotation != nil { selected.points = selected.points.map { CGPoint(x: $0.x + dragOffset.x, y: $0.y + dragOffset.y) } }
+            selected = draggedPreviewAnnotation ?? selected
             context.setStrokeColor(NSColor(ShotTheme.accent).cgColor)
             context.setLineWidth(1.5 / scale)
             context.setLineDash(phase: 0, lengths: [5 / scale, 3 / scale])
             context.stroke(selected.selectionBounds.insetBy(dx: -5 / scale, dy: -5 / scale))
             context.setLineDash(phase: 0, lengths: [])
+            if [.arrow, .line].contains(selected.tool), selected.points.count == 2 {
+                for point in selected.points {
+                    let handle = CGRect(x: point.x - 5 / scale, y: point.y - 5 / scale, width: 10 / scale, height: 10 / scale)
+                    context.setFillColor(NSColor.white.cgColor)
+                    context.fillEllipse(in: handle)
+                    context.strokeEllipse(in: handle)
+                }
+            }
         }
         if let crop = draft?.tool == .crop ? draft?.rect : document.state.crop {
             context.setFillColor(NSColor(ShotTheme.text).withAlphaComponent(0.3).cgColor)
@@ -431,32 +503,46 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
                        y: clamp ? max(0, min(CGFloat(document.base.height), y)) : y)
     }
     override func mouseDown(with event: NSEvent) {
-        commitText()
-        window?.makeFirstResponder(self)
         let raw = imagePoint(event, clamp: false)
-        guard CGRect(x: 0, y: 0, width: document.base.width, height: document.base.height).contains(raw) else {
+        let scale = imageRect.width / CGFloat(document.base.width)
+        // A first click with the text tool opens a draft. A following double-click
+        // on placed text must cancel that draft before opening the existing annotation.
+        let editsExistingText = event.clickCount >= 2 && document.annotation(at: raw, tolerance: 7 / scale)?.tool == .text
+        commitText(cancel: editsExistingText && editingTextID == nil)
+        window?.makeFirstResponder(self)
+        let endpoint = document.tool == .select ? selectedEndpoint(at: raw, tolerance: 9 / scale) : nil
+        guard endpoint != nil || CGRect(x: 0, y: 0, width: document.base.width, height: document.base.height).contains(raw) else {
             document.select(nil)
             cancelMove()
             needsDisplay = true
             return
         }
         let point = imagePoint(event)
+        let hit = document.annotation(at: point, tolerance: 7 / scale)
+        if event.clickCount >= 2, let hit, hit.tool == .text {
+            cancelMove()
+            document.select(hit.id)
+            document.tool = .select
+            beginText(at: hit.points.first ?? point, annotation: hit)
+            needsDisplay = true
+            return
+        }
         if document.tool == .select {
-            let scale = imageRect.width / CGFloat(document.base.width)
-            let selected = document.annotation(at: point, tolerance: 7 / scale)
+            let selected = endpoint != nil ? document.selectedAnnotation : hit
             document.select(selected?.id)
+            draggedEndpointIndex = endpoint
             draggedAnnotation = selected
             dragOrigin = selected == nil ? nil : point
             dragOffset = .zero
             if let selected {
                 movePreview = EditorRenderer.render(base: document.base, annotations: document.state.annotations.filter { $0.id != selected.id }, crop: nil, padding: 0, background: .transparent)
-                document.status = "ドラッグで移動 / Delete で削除 / Esc で選択解除"
+                document.status = Self.selectionHelp(for: selected)
             } else { movePreview = nil }
             needsDisplay = true
             return
         }
         document.select(nil)
-        var annotation = EditorAnnotation(tool: document.tool, points: [point, point], color: document.color, width: document.lineWidth)
+        var annotation = EditorAnnotation(tool: document.tool, points: [point, point], color: document.color, width: document.lineWidth, fontSize: document.fontSize)
         if document.tool == .text {
             beginText(at: point)
         } else if document.tool == .number {
@@ -482,7 +568,9 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
     }
     override func mouseUp(with event: NSEvent) {
         if draggedAnnotation != nil {
-            document.moveSelected(by: dragOffset)
+            if let index = draggedEndpointIndex, let moved = draggedPreviewAnnotation {
+                document.moveSelectedEndpoint(index, to: moved.points[index])
+            } else { document.moveSelected(by: dragOffset) }
             cancelMove()
             needsDisplay = true
             return
@@ -493,14 +581,17 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         else if annotation.tool == .pen || annotation.rect.width > 1 || annotation.rect.height > 1 { document.add(annotation) }
         needsDisplay = true
     }
-    private func beginText(at point: CGPoint) {
+    private func beginText(at point: CGPoint, annotation: EditorAnnotation? = nil) {
         let rect = imageRect
         let scale = rect.width / CGFloat(document.base.width)
         let origin = CGPoint(x: rect.minX + point.x * scale, y: rect.minY + point.y * scale)
         let field = NSTextField(frame: CGRect(x: origin.x, y: origin.y, width: min(280, max(100, bounds.width - origin.x - 12)), height: 32))
-        field.stringValue = document.text
+        field.stringValue = annotation?.text ?? document.text
         field.placeholderString = "テキストを入力"
-        field.font = .systemFont(ofSize: max(14, (document.lineWidth * 5 + 10) * scale), weight: .bold)
+        let fontSize = (annotation?.fontSize ?? document.fontSize) * scale
+        field.font = .systemFont(ofSize: max(14, fontSize), weight: .bold)
+        field.frame.size.height = max(32, fontSize * 1.4)
+        field.frame.size.width = min(max(280, field.attributedStringValue.size().width + 24), max(100, bounds.width - origin.x - 12))
         field.textColor = NSColor(ShotTheme.text)
         field.backgroundColor = NSColor(ShotTheme.panel)
         field.drawsBackground = true
@@ -509,6 +600,7 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         field.bezelStyle = .roundedBezel
         field.delegate = self
         textPoint = point
+        editingTextID = annotation?.id
         textEditor = field
         addSubview(field)
         document.status = "テキストを入力：Enter で確定 / Esc で取消"
@@ -518,13 +610,16 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
     private func commitText(cancel: Bool = false) {
         guard let field = textEditor, let point = textPoint else { return }
         let text = (field.currentEditor()?.string ?? field.stringValue).trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingID = editingTextID
         textEditor = nil
         textPoint = nil
+        editingTextID = nil
         field.delegate = nil
         field.removeFromSuperview()
         if !cancel && !text.isEmpty {
             document.text = text
-            document.add(EditorAnnotation(tool: .text, points: [point], color: document.color, width: document.lineWidth, text: text))
+            if let existingID { document.updateText(text, id: existingID) }
+            else { document.add(EditorAnnotation(tool: .text, points: [point], color: document.color, width: document.lineWidth, text: text, fontSize: document.fontSize)) }
         }
         needsDisplay = true
     }
@@ -543,7 +638,29 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
         }
         return false
     }
+    private func selectedEndpoint(at point: CGPoint, tolerance: CGFloat) -> Int? {
+        guard let annotation = document.selectedAnnotation, [.arrow, .line].contains(annotation.tool), annotation.points.count == 2 else { return nil }
+        let closest = annotation.points.indices.min {
+            hypot(annotation.points[$0].x - point.x, annotation.points[$0].y - point.y) < hypot(annotation.points[$1].x - point.x, annotation.points[$1].y - point.y)
+        }
+        return closest.flatMap { hypot(annotation.points[$0].x - point.x, annotation.points[$0].y - point.y) <= tolerance ? $0 : nil }
+    }
+    private var draggedPreviewAnnotation: EditorAnnotation? {
+        guard var annotation = draggedAnnotation else { return nil }
+        if let index = draggedEndpointIndex {
+            annotation.points[index] = CGPoint(x: annotation.points[index].x + dragOffset.x, y: annotation.points[index].y + dragOffset.y)
+        } else {
+            annotation.points = annotation.points.map { CGPoint(x: $0.x + dragOffset.x, y: $0.y + dragOffset.y) }
+        }
+        return annotation
+    }
+    static func selectionHelp(for annotation: EditorAnnotation) -> String {
+        if annotation.tool == .text { return "ダブルクリックで文字を修正 / 右側で色・文字サイズ / ドラッグで移動" }
+        if [.arrow, .line].contains(annotation.tool) { return "両端の丸をドラッグで調整 / 右側で色・太さ / Delete で削除" }
+        return "ドラッグで移動 / 右側でスタイル変更 / Delete で削除 / Esc で選択解除"
+    }
     private func cancelMove() {
+        draggedEndpointIndex = nil
         dragOrigin = nil
         draggedAnnotation = nil
         dragOffset = .zero
@@ -569,7 +686,7 @@ final class AnnotationCanvas: NSView, NSTextFieldDelegate {
             cancelMove()
             document.tool = tool
             if tool != .select { document.select(nil) }
-            document.status = tool == .select ? "注釈をクリックして選択 / ドラッグで移動 / Delete で削除" : "\(tool.title)：画像の上をドラッグ"
+            document.status = tool == .select ? "注釈をクリックして選択 / 文字はダブルクリックで修正 / 矢印・線は両端を調整" : "\(tool.title)：画像の上をドラッグ"
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
             return

@@ -199,4 +199,108 @@ final class EditorTests: XCTestCase {
         }
     }
 
+    func testDoubleClickEditsExistingTextAndEscapePreservesOriginal() throws {
+        try MainActor.assumeIsolated {
+            let document = try XCTUnwrap(EditorDocument(image: NSImage(cgImage: fixture(), size: NSSize(width: 80, height: 60))))
+            let original = EditorAnnotation(tool: .text, points: [CGPoint(x: 10, y: 10)], color: .white, width: 5, text: "元の文字")
+            document.add(original)
+            let canvas = AnnotationCanvas(document: document)
+            canvas.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+            let event = try mouse(.leftMouseDown, point: CGPoint(x: 12, y: 12), clicks: 2)
+            canvas.mouseDown(with: event)
+            let cancelled = try XCTUnwrap(canvas.subviews.first as? NSTextField)
+            XCTAssertEqual(cancelled.stringValue, "元の文字")
+            cancelled.stringValue = "キャンセル"
+            _ = canvas.control(cancelled, textView: NSTextView(), doCommandBy: #selector(NSResponder.cancelOperation(_:)))
+            XCTAssertEqual(document.state.annotations.first?.text, "元の文字")
+            XCTAssertEqual(document.state.annotations.first?.id, original.id)
+            canvas.mouseDown(with: event)
+            let field = try XCTUnwrap(canvas.subviews.first as? NSTextField)
+            field.stringValue = "修正した文字"
+            _ = canvas.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:)))
+            XCTAssertEqual(document.state.annotations.count, 1)
+            XCTAssertEqual(document.state.annotations.first?.id, original.id)
+            XCTAssertEqual(document.state.annotations.first?.text, "修正した文字")
+            document.undo()
+            XCTAssertEqual(document.state.annotations.first?.text, "元の文字")
+            document.redo()
+            XCTAssertEqual(document.state.annotations.first?.text, "修正した文字")
+        }
+    }
+
+    func testSelectedArrowEndpointDragMovesOnlyChosenEndInOneUndoStep() throws {
+        try MainActor.assumeIsolated {
+            for tool in [EditorTool.arrow, .line] {
+                let document = try XCTUnwrap(EditorDocument(image: NSImage(cgImage: fixture(), size: NSSize(width: 80, height: 60))))
+                let annotation = EditorAnnotation(tool: tool, points: [CGPoint(x: 10, y: 10), CGPoint(x: 60, y: 40)], color: .white, width: 2)
+                document.add(annotation)
+                document.select(annotation.id)
+                let canvas = AnnotationCanvas(document: document)
+                canvas.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+                canvas.mouseDown(with: try mouse(.leftMouseDown, point: CGPoint(x: 60, y: 40)))
+                canvas.mouseDragged(with: try mouse(.leftMouseDragged, point: CGPoint(x: 62, y: 42)))
+                canvas.mouseDragged(with: try mouse(.leftMouseDragged, point: CGPoint(x: 70, y: 50)))
+                canvas.mouseUp(with: try mouse(.leftMouseUp, point: CGPoint(x: 70, y: 50)))
+                XCTAssertEqual(document.selectedAnnotation?.points.first, CGPoint(x: 10, y: 10))
+                XCTAssertEqual(document.selectedAnnotation?.points.last, CGPoint(x: 70, y: 50))
+                document.undo()
+                XCTAssertEqual(document.selectedAnnotation?.points, annotation.points)
+                document.redo()
+                XCTAssertEqual(document.selectedAnnotation?.points.last, CGPoint(x: 70, y: 50))
+            }
+        }
+    }
+
+    func testNormalDoubleClickWithTextToolDoesNotDuplicateExistingText() throws {
+        try MainActor.assumeIsolated {
+            let document = try XCTUnwrap(EditorDocument(image: NSImage(cgImage: fixture(), size: NSSize(width: 80, height: 60))))
+            let original = EditorAnnotation(tool: .text, points: [CGPoint(x: 10, y: 10)], color: .white, width: 2, text: "元の文字", fontSize: 24)
+            document.add(original)
+            document.tool = .text
+            let canvas = AnnotationCanvas(document: document)
+            canvas.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+            canvas.mouseDown(with: try mouse(.leftMouseDown, point: CGPoint(x: 12, y: 12)))
+            canvas.mouseUp(with: try mouse(.leftMouseUp, point: CGPoint(x: 12, y: 12)))
+            canvas.mouseDown(with: try mouse(.leftMouseDown, point: CGPoint(x: 12, y: 12), clicks: 2))
+            let field = try XCTUnwrap(canvas.subviews.first as? NSTextField)
+            field.stringValue = "修正"
+            _ = canvas.control(field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:)))
+            XCTAssertEqual(document.state.annotations.count, 1)
+            XCTAssertEqual(document.state.annotations.first?.id, original.id)
+            XCTAssertEqual(document.state.annotations.first?.text, "修正")
+            XCTAssertEqual(document.state.annotations.first?.fontSize, 24)
+            XCTAssertEqual(document.state.annotations.first?.width, 2)
+            XCTAssertTrue(try XCTUnwrap(document.state.annotations.first?.color).isEqual(NSColor.white))
+        }
+    }
+
+    func testEndpointHandleRemainsUsableAtImageBoundaryAndEscapeCancelsDrag() throws {
+        try MainActor.assumeIsolated {
+            let document = try XCTUnwrap(EditorDocument(image: NSImage(cgImage: fixture(), size: NSSize(width: 80, height: 60))))
+            let original = EditorAnnotation(tool: .arrow, points: [CGPoint(x: 80, y: 40), CGPoint(x: 30, y: 10)], color: .white, width: 5)
+            document.add(original)
+            document.select(original.id)
+            let canvas = AnnotationCanvas(document: document)
+            canvas.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+            canvas.mouseDown(with: try mouse(.leftMouseDown, point: CGPoint(x: 80.5, y: 40)))
+            canvas.mouseDragged(with: try mouse(.leftMouseDragged, point: CGPoint(x: 70, y: 40)))
+            canvas.mouseUp(with: try mouse(.leftMouseUp, point: CGPoint(x: 70, y: 40)))
+            XCTAssertEqual(document.selectedAnnotation?.points.first, CGPoint(x: 70, y: 40))
+            XCTAssertEqual(document.selectedAnnotation?.points.last, CGPoint(x: 30, y: 10))
+            canvas.mouseDown(with: try mouse(.leftMouseDown, point: CGPoint(x: 70, y: 40)))
+            canvas.mouseDragged(with: try mouse(.leftMouseDragged, point: CGPoint(x: 60, y: 30)))
+            let escape = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 53))
+            canvas.keyDown(with: escape)
+            canvas.mouseUp(with: try mouse(.leftMouseUp, point: CGPoint(x: 60, y: 30)))
+            XCTAssertEqual(document.state.annotations.first?.points.first, CGPoint(x: 70, y: 40))
+            document.undo()
+            XCTAssertEqual(document.state.annotations.first?.points, original.points)
+        }
+    }
+
+    private func mouse(_ type: NSEvent.EventType, point: CGPoint, clicks: Int = 1) throws -> NSEvent {
+        let scale = min(736.0 / 80, 536.0 / 60)
+        return try XCTUnwrap(NSEvent.mouseEvent(with: type, location: CGPoint(x: (800 - 80 * scale) / 2 + point.x * scale, y: (600 - 60 * scale) / 2 + point.y * scale), modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 1, clickCount: clicks, pressure: 1))
+    }
+
 }

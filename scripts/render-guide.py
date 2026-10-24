@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Render the Japanese HS Shot quick-start from safe, real-app stills.
+"""Render the v1.3.0 Japanese guide from safe screenshots of the actual app.
 
-Requires macOS `say` (Kyoko), Pillow, and ffmpeg. This is an illustrated
-walkthrough made from real UI screenshots, not a continuous screen recording.
-Raw capture material is kept in the ignored .build/tutorial directory.
+This is a narrated still-image walkthrough, not a continuous screen recording.
+The source frames and intermediate files stay in ignored .build/tutorial-v130.
+macOS say (Kyoko), Pillow and ffmpeg are required. Run --audio-only first to
+obtain exact chapter times; --cards-only allows visual review before encoding.
 """
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import glob
 import json
 import math
@@ -18,53 +20,70 @@ import unicodedata
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
-WORK = ROOT / ".build/tutorial"
+WORK = ROOT / ".build/tutorial-v130"
 OUT = ROOT / "website/hs-shot-download/dist/assets"
+VERSION = "1.3.0"
+BASENAME = f"hs-shot-guide-v{VERSION}"
 FFMPEG = "/opt/homebrew/bin/ffmpeg"
 FFPROBE = "/opt/homebrew/bin/ffprobe"
 W, H, FPS = 1920, 1080, 30
 INK = (36, 49, 70)
-MUTED = (100, 116, 139)
+MUTED = (94, 111, 134)
 BLUE = (46, 110, 221)
 BG = (246, 248, 252)
 
+# The screenshots are genuine app states. Crops are normalized to accommodate
+# Retina and non-Retina captures without manufacturing or retouching app UI.
 CHAPTERS = [
-    dict(id="intro", step="START", title="撮って、伝えて、すぐ共有。", sub="HS Shot かんたんガイド", frame=None,
-         caption="撮影 → 左下のプレビュー → 編集 → 保存",
-         speech="エイチエスショットの使い方です。撮影から編集、保存まで、順番に見ていきましょう。"),
-    dict(id="install", step="01 / INSTALL", title="まずは、インストール。", sub="配布ページから PKG をダウンロード", frame=None,
-         caption="PKG を開いてインストール → アプリケーションから起動",
-         speech="配布ページから、ピーケージーをダウンロードして開きます。インストールが終わったら、アプリケーションから、エイチエスショットを起動します。"),
-    dict(id="permission", step="02 / FIRST SETUP", title="初回は「画面収録」を許可。", sub="システム設定 → プライバシーとセキュリティ", frame="08-permission.jpg",
-         caption="HS Shot をオンにしたら、アプリを再起動してください",
-         speech="初回は画面収録を許可します。システム設定の、プライバシーとセキュリティで、エイチエスショットをオンにして、アプリを再起動します。"),
-    dict(id="capture", step="03 / CAPTURE", title="「新規キャプチャ」をクリック。", sub="いつでも ⌘ ⇧ 2 でも範囲を選んで撮影できます", frame="01-library.jpg",
-         caption="「新規キャプチャ」または ⌘ ⇧ 2",
-         speech="新規キャプチャ、を押します。ショートカットは、コマンド、シフト、数字の2です。"),
-    dict(id="area", step="03 / CAPTURE", title="必要なところだけ、囲む。", sub="ドラッグして範囲を決め、マウスを離す", frame="02-area.jpg",
-         caption="ドラッグで範囲を選択。Esc でキャンセルできます",
-         speech="撮りたい部分を、ドラッグで囲みます。範囲を決めてマウスを離せば、撮影完了です。"),
-    dict(id="preview", step="04 / PREVIEW", title="画像は、左下で待っています。", sub="210 × 150 ポイントの固定サイズ・自動では消えません", frame="03-preview.jpg",
-         caption="作業を続けても、左下のプレビューに残ります",
-         speech="撮った画像は、左下の小さなプレビューに残ります。大きさは固定で、自動では消えません。"),
-    dict(id="hover", step="04 / PREVIEW", title="重ねると、操作が現れます。", sub="コピー・保存・画像クリックで編集", frame="04-hover.jpg",
-         caption="そのまま渡すならコピー。編集するなら画像をクリック",
-         speech="マウスを重ねると、コピーと保存が表示されます。画像をクリックすると、編集画面が開きます。"),
-    dict(id="editor", step="05 / EDIT", title="伝えたい場所に、矢印や文字。", sub="左のツールを選び、画像に直接追加", frame="05-editor.jpg",
-         caption="矢印・文字・切り抜き。色と太さは右側で調整",
-         speech="左のツールから矢印や文字を選び、画像に直接追加します。右側で色や太さを変えられます。"),
-    dict(id="annotated", step="05 / EDIT", title="ひと目で伝わる、1 枚に。", sub="不要な部分は切り抜き・⌘ Z で取り消し", frame="06-annotated.jpg",
-         caption="間違えたら ⌘ Z。ひとつ前に戻せます",
-         speech="不要な部分は切り抜き。間違えたら、コマンド、ゼットで、ひとつ前に戻せます。"),
-    dict(id="library-save", step="06 / SAVE", title="編集版を、ライブラリに残す。", sub="「ライブラリに保存」で、原本とは別に保存", frame="06-annotated.jpg",
-         caption="原本を残したまま、編集版を保存できます",
-         speech="ライブラリに保存すると、原本を残して編集版を保存できます。"),
-    dict(id="save", step="07 / EXPORT", title="ファイルで渡すなら、書き出す。", sub="PNG / JPEG で保存できます", frame="07-export.jpg",
-         caption="「書き出す」→ 保存先とファイル名を決める → Save",
-         speech="ファイルで渡すときは、書き出す、から、保存先を選びます。"),
-    dict(id="finish", step="READY", title="撮って、編集して、渡す。", sub="使い方に迷ったら、このページへ", frame="06-annotated.jpg",
-         caption="画像は Mac 内に保存。クラウドへの自動送信はありません",
-         speech="エイチエスショットは、画像をマックの中に保存します。撮って、編集して、コピーか書き出し。これで準備完了です。"),
+    dict(id="intro", step="START", title="閉じても、続きから。", sub="HS Shot 1.3.0 — 撮影から自動保存・再編集まで", frame=None,
+         caption="自動保存 → アプリ終了 → 履歴から再編集",
+         speech=["最新版、エイチエスショット、1.3 の使い方です。", "途中の編集を自動で残し、アプリを終了した後も、続きから調整できます。"]),
+    dict(id="setup", step="01 / はじめて使うとき", title="インストールして、画面収録を許可。", sub="初回の設定は、配布ページでも案内しています", frame=None,
+         caption="配布ページの PKG → インストール → 画面収録を許可 → 再起動",
+         speech=["配布ページのピーケージーを開いて、インストールします。", "初回は画面収録を許可して、アプリを再起動してください。"]),
+    dict(id="capture", step="02 / 撮影", title="必要な範囲を、ドラッグで撮影。", sub="「範囲を選択」または ⌘ ⇧ 2", frame="01-library.png", crop=(0, 0.07, 1, 0.57),
+         detail="画面上部を拡大", caption="範囲をドラッグして、マウスを離すと撮影できます",
+         speech=["範囲を選択、を押すか、コマンド、シフト、数字の2。", "必要な範囲をドラッグして、マウスを離すと撮影できます。"]),
+    dict(id="preview", step="03 / 左下のプレビュー", title="撮った画像は、左下に残ります。", sub="固定サイズのプレビューから、すぐに編集へ", frame="02-preview.png", layout="preview",
+         caption="画像をクリックすると編集画面が開きます",
+         speech=["撮った画像は、左下の小さなプレビューに残ります。", "画像をクリックして、編集画面を開きましょう。"]),
+    dict(id="editor", step="04 / 編集", title="矢印や文字を、画像に追加。", sub="左でツールを選び、右で色や太さを調整します", frame="03-editor.png",
+         caption="左のツール → 画像上で操作 → 右側で見た目を調整",
+         speech=["左のツールから矢印や文字を選んで、画像に追加します。", "色や太さは、右側で調整できます。"]),
+    dict(id="text", step="04 / 編集", title="文字は、入力途中でも大丈夫。", sub="この例では、文字を入力したまま操作を続けます", frame="04-text.png", crop=(0.075, 0.27, 0.775, 0.81), detail="画像と注釈を拡大",
+         caption="このあと「完了」を押さずに、アプリを終了してみます",
+         speech=["ここでは文字を入力して、矢印も付けました。", "このあと、完了を押さずにアプリを終了してみます。"]),
+    dict(id="autosave", step="05 / 自動保存", title="「自動保存済み」を確認。", sub="編集内容は、少し待つと Mac 内に保存されます", frame="05-autosaved.png", layout="autosave",
+         caption="「完了」を押さなくても、途中の文字や矢印が残ります",
+         speech=["編集すると、少し待って、自動保存済み、と表示されます。", "完了を押さなくても、途中の文字や矢印が、マックの中に残ります。"]),
+    dict(id="quit", step="06 / アプリを終了", title="「完了」を押さずに、終了。", sub="HS Shot メニュー →「HS Shotを終了」。ショートカットは ⌘ Q", frame="05-autosaved.png", layout="quit",
+         caption="「HS Shot」メニュー →「HS Shotを終了」／ ショートカットは ⌘ Q",
+         speech=["ここでは、完了を押さずに、メニューから、エイチエスショットを終了します。", "編集画面の、閉じるボタンで閉じた場合も、変更は保存されます。"]),
+    dict(id="relaunch", step="07 / アプリを起動", title="HS Shot を、もう一度起動。", sub="アプリケーションから HS Shot を開きます", frame=None,
+         caption="アプリを終了したあと、同じ Mac で再起動しています",
+         speech=["アプリケーションから、エイチエスショットを、もう一度起動します。"]),
+    dict(id="history", step="08 / 履歴から開く", title="履歴に、途中の編集が残っています。", sub="「編集中」の画像を選び、編集画面を開きます", frame="07-restarted-history.png", crop=(0.20, 0.5, 0.98, 0.93), detail="履歴と、選択した画像の操作を拡大",
+         caption="「編集中」の画像を選択 → 画面下の「編集」",
+         speech=["履歴から、編集中の画像を選びます。", "画面下の、編集、を押すと、続きから開けます。"]),
+    dict(id="restored", step="09 / 続きから再編集", title="文字も矢印も、再び選べます。", sub="画像に焼き込まず、編集できる状態で保存しています", frame="08-restored-editor.png", crop=(0.075, 0.27, 0.775, 0.81), detail="画像と注釈を拡大",
+         caption="再起動後も、文字と矢印を個別に選んで調整できます",
+         speech=["さっきの文字と矢印が、そのまま戻りました。", "再起動後も、それぞれを選んで、調整できます。"]),
+    dict(id="reedited", step="09 / 続きから再編集", title="文字を書き換え、矢印の向きを調整。", sub="文字をダブルクリック。矢印は選択して端をドラッグ", frame="09-reedited.png", crop=(0.075, 0.27, 0.775, 0.81), detail="画像と注釈を拡大",
+         sequence=["09a-reedit-text.png", "09b-arrow-before.png", "09-reedited.png"],
+         caption="文字をダブルクリックで修正 ／ 矢印の端をドラッグで調整",
+         speech=["文字をダブルクリックして、内容を書き換えます。", "矢印は選択して、端をドラッグ。位置や向きを、もう一度調整できます。"]),
+    dict(id="done", step="10 / 編集を終える", title="調整できたら、「完了」。", sub="編集結果が、左下のプレビューに戻ります", frame="09-reedited.png", layout="done",
+         caption="「完了」で編集を閉じる → 左下のプレビューへ",
+         speech=["調整できたら、右上の、完了、を押します。", "編集した画像が、左下のプレビューに戻ります。"]),
+    dict(id="completed", step="10 / 編集を終える", title="プレビューから、保存へ。", sub="もう一度クリックすれば、引き続き編集できます", frame="10-completed-preview.png", layout="preview",
+         caption="マウスを重ねて「保存」。または右クリックして「保存」",
+         speech=["プレビューにマウスを重ねて、保存を押します。", "もう一度画像をクリックすれば、続けて編集できます。"]),
+    dict(id="export", step="11 / ファイルに保存", title="保存先とファイル名を決める。", sub="「書き出す」を押すと、画像ファイルを保存できます", frame="11-export.png",
+         caption="履歴への自動保存と、画像ファイルの書き出しは別の操作です",
+         speech=["保存先とファイル名を決めて、書き出す、を押します。", "履歴への自動保存と、画像ファイルとしての保存は、別の操作です。"]),
+    dict(id="finish", step="READY", title="途中で閉じても、続きから。", sub="必要なときに履歴から開いて、何度でも調整できます", frame="09-reedited.png", crop=(0.075, 0.27, 0.775, 0.81), detail="画像と注釈を拡大",
+         caption="撮影 → 自動保存 → 履歴から再編集 → 画像を書き出す",
+         speech=["撮影、自動保存、履歴から再編集。", "途中で閉じても、続きから。エイチエスショット、1.3 です。"]),
 ]
 
 
@@ -76,6 +95,7 @@ def duration(path: Path) -> float:
     return float(subprocess.check_output([FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)]))
 
 
+@lru_cache(maxsize=64)
 def font(size: int, bold=False):
     for p in glob.glob("/System/Library/Fonts/*.ttc"):
         if unicodedata.normalize("NFC", Path(p).name) == f"ヒラギノ角ゴシック W{6 if bold else 3}.ttc":
@@ -96,7 +116,7 @@ def wrap(draw, text, f, width):
     return lines
 
 
-def text_center(draw, text, y, f, fill=INK, width=1720, spacing=14):
+def centered(draw, text, y, f, fill=INK, width=1720, spacing=12):
     for line in wrap(draw, text, f, width):
         tw = draw.textlength(line, font=f)
         draw.text(((W - tw) / 2, y), line, font=f, fill=fill)
@@ -104,15 +124,14 @@ def text_center(draw, text, y, f, fill=INK, width=1720, spacing=14):
     return y
 
 
-def rounded_image(canvas, im, box, radius=28):
+def rounded_image(canvas, im, box, radius=24, max_scale=4):
     x, y, width, height = box
     shadow = Image.new("RGBA", canvas.size)
-    sd = ImageDraw.Draw(shadow)
-    sd.rounded_rectangle((x, y + 14, x + width, y + height + 14), radius, fill=(36, 49, 70, 38))
-    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(22)))
+    ImageDraw.Draw(shadow).rounded_rectangle((x, y + 10, x + width, y + height + 10), radius, fill=(36, 49, 70, 32))
+    canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(18)))
     card = Image.new("RGB", (width, height), "white")
     im = im.convert("RGB")
-    scale = min(width / im.width, height / im.height, 2.5)
+    scale = min(width / im.width, height / im.height, max_scale)
     im = im.resize((round(im.width * scale), round(im.height * scale)), Image.Resampling.LANCZOS)
     card.paste(im, ((width - im.width) // 2, (height - im.height) // 2))
     mask = Image.new("L", card.size)
@@ -121,113 +140,133 @@ def rounded_image(canvas, im, box, radius=28):
     return (x + (width - im.width) // 2, y + (height - im.height) // 2, im.width, im.height)
 
 
-def ui_callout(draw, source_size, placed, region, label, label_xy):
-    """Point to an observed region of a real screenshot; never draw app UI."""
-    px, py, pw, ph = placed
-    sx, sy = source_size
-    x0, y0, x1, y1 = region
-    rect = (px + x0 * pw / sx - 5, py + y0 * ph / sy - 5,
-            px + x1 * pw / sx + 5, py + y1 * ph / sy + 5)
-    draw.rounded_rectangle(rect, 10, outline=BLUE, width=4)
-    lx, ly = label_xy
-    f = font(27, True)
-    lw = draw.textlength(label, font=f) + 42
-    lh = 66
-    midx, midy = ((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2)
-    anchorx = lx + lw if lx < midx else lx
-    draw.line((anchorx, ly + lh / 2, midx, midy), fill=BLUE, width=3)
-    draw.rounded_rectangle((lx, ly, lx + lw, ly + lh), 18, fill=(235, 241, 252), outline=(205, 221, 249), width=2)
-    draw.text((lx + 21, ly + 15), label, font=f, fill=BLUE)
+def crop_fraction(image, box):
+    return image.crop(tuple(round(v * (image.width if i % 2 == 0 else image.height)) for i, v in enumerate(box)))
 
 
-def area_diagram(hint_path, progress=1.0):
-    """An explicitly labelled diagram, never a fabricated recording."""
-    card = Image.new("RGB", (1680, 560), "white")
-    d = ImageDraw.Draw(card)
-    sample_path = WORK / "HS Shot 使い方サンプル.png"
-    sample = Image.open(sample_path).convert("RGB").crop((80, 100, 2320, 1160))
-    sample = sample.resize((950, 450), Image.Resampling.LANCZOS)
-    card.paste(sample, (365, 100))
-    hint = Image.open(hint_path).convert("RGB")
-    hint = hint.resize((678, 86), Image.Resampling.LANCZOS)
-    hint_mask = Image.new("L", hint.size)
-    ImageDraw.Draw(hint_mask).rounded_rectangle((0, 0, 677, 85), 43, fill=255)
-    card.paste(hint, (500, 6), hint_mask)
-    d.rounded_rectangle((1280, 18, 1635, 69), 15, fill=(235, 241, 252))
-    d.text((1299, 31), "範囲選択のイメージ", font=font(23, True), fill=BLUE)
-    x0, y0, x1, y1 = 390, 286, 1300, 470
-    f = min(1.0, max(0.03, progress))
-    cx, cy = round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f)
-    d.rectangle((x0, y0, cx, cy), outline=BLUE, width=5)
-    for x, y in ((x0, y0), (cx, cy)):
-        d.ellipse((x - 7, y - 7, x + 7, y + 7), fill=BLUE)
-    d.polygon([(cx + 3, cy + 3), (cx + 5, cy + 40), (cx + 15, cy + 30), (cx + 23, cy + 48),
-               (cx + 30, cy + 45), (cx + 22, cy + 27), (cx + 37, cy + 26)], fill="white", outline=INK, width=2)
-    d.text((50, 337), "ドラッグで囲む", font=font(29, True), fill=BLUE)
-    d.line((280, 357, x0 - 16, 357), fill=BLUE, width=3)
-    return card
+def label(draw, text, xy, size=28):
+    x, y = xy
+    f = font(size, True)
+    width = round(draw.textlength(text, font=f)) + 36
+    draw.rounded_rectangle((x, y, x + width, y + size + 32), 16, fill=(232, 240, 253))
+    draw.text((x + 18, y + 12), text, font=f, fill=BLUE)
 
 
-def render_still(chapter, index, total, area_progress=1.0, output=None):
+def actual_detail(canvas, source, box, heading, crop):
+    """A labeled zoom inset of source pixels; the app UI itself is untouched."""
+    x, y, width, height = box
+    d = ImageDraw.Draw(canvas)
+    d.text((x, y), heading, font=font(25, True), fill=BLUE)
+    rounded_image(canvas, crop_fraction(source, crop), (x, y + 48, width, height - 48), radius=20)
+
+
+def callout(draw, placed, point, text, xy):
+    """Label an observed control without replacing any screenshot pixels."""
+    px, py, width, height = placed
+    tx, ty = px + width * point[0], py + height * point[1]
+    lx, ly = xy
+    label_width = draw.textlength(text, font=font(28, True)) + 36
+    anchor = lx + label_width if lx < tx else lx
+    draw.line((anchor, ly + 30, tx, ty), fill=BLUE, width=3)
+    draw.ellipse((tx - 16, ty - 16, tx + 16, ty + 16), outline=BLUE, width=3)
+    label(draw, text, xy)
+
+
+def diagram(canvas, kind):
+    d = ImageDraw.Draw(canvas)
+    if kind == "intro":
+        d.rounded_rectangle((120, 258, 1800, 886), 32, fill=(232, 240, 253))
+        centered(d, "HS Shot", 345, font(104, True))
+        centered(d, "撮影 → 自動保存 → 終了 → 履歴から再編集", 535, font(42, True), BLUE)
+        centered(d, "macOS 14 以降  /  Apple Silicon・Intel 対応", 652, font(28), MUTED)
+        centered(d, "実際のアプリ画面を使った、音声・字幕つきガイド", 740, font(26), MUTED)
+    elif kind == "setup":
+        labels = [("1", "インストール", "配布ページの PKG を開く"), ("2", "画面収録を許可", "システム設定で HS Shot をオン"), ("3", "アプリを再起動", "初回の設定はこれで完了")]
+        for j, (n, title, desc) in enumerate(labels):
+            x = 120 + j * 570
+            d.rounded_rectangle((x, 280, x + 540, 840), 28, fill="white", outline=(222, 229, 239), width=2)
+            d.ellipse((x + 215, 345, x + 325, 455), fill=(232, 240, 253))
+            d.text((x + 251, 367), n, font=font(52, True), fill=BLUE)
+            tw = d.textlength(title, font=font(34, True))
+            d.text((x + (540 - tw) / 2, 540), title, font=font(34, True), fill=INK)
+            tw = d.textlength(desc, font=font(24))
+            d.text((x + (540 - tw) / 2, 625), desc, font=font(24), fill=MUTED)
+        centered(d, "画面収録：システム設定 → プライバシーとセキュリティ", 860, font(25), MUTED)
+    else:
+        d.rounded_rectangle((120, 280, 1800, 850), 32, fill="white", outline=(222, 229, 239), width=2)
+        centered(d, "アプリ終了", 378, font(62, True))
+        centered(d, "↓", 490, font(68), BLUE)
+        centered(d, "アプリケーションから HS Shot を起動", 620, font(46, True), BLUE)
+        centered(d, "この場面は、終了と再起動の手順を示す説明図です", 785, font(24), MUTED)
+
+
+def render_still(chapter, index, total, output=None):
     im = Image.new("RGBA", (W, H), BG + (255,))
     d = ImageDraw.Draw(im)
-    d.text((92, 49), "HS Shot", font=font(31, True), fill=INK)
-    d.text((W - 525, 55), "かんたんガイド  /  音声・字幕つき", font=font(21), fill=MUTED)
-    d.line((92, 110, W - 92, 110), fill=(220, 227, 237), width=2)
-    d.text((92, 143), chapter["step"], font=font(23, True), fill=BLUE)
-    d.text((92, 188), chapter["title"], font=font(49, True), fill=INK)
-    d.text((95, 261), chapter["sub"], font=font(26), fill=MUTED)
+    d.text((90, 29), "HS Shot 1.3.0", font=font(25, True), fill=INK)
+    right = "実画面ガイド / 日本語の音声・字幕つき"
+    d.text((W - 90 - d.textlength(right, font=font(21)), 34), right, font=font(21), fill=MUTED)
+    d.line((90, 83, W - 90, 83), fill=(220, 227, 237), width=2)
+    d.text((90, 108), chapter["step"], font=font(23, True), fill=BLUE)
+    d.text((90, 151), chapter["title"], font=font(47, True), fill=INK)
+    d.text((92, 218), chapter["sub"], font=font(26), fill=MUTED)
 
     if chapter["frame"]:
         path = WORK / "frames" / chapter["frame"]
-        if not path.exists() and chapter["id"] == "hover":
-            path = WORK / "frames/03-preview.jpg"
         if not path.exists():
             raise FileNotFoundError(f"Missing actual app screenshot: {path}")
-        source = area_diagram(path, area_progress) if chapter["id"] == "area" else Image.open(path)
-        if chapter["id"] == "permission" and source.size == (1180, 800):
-            # A close-up of the real permission card makes its path legible.
-            source = source.crop((280, 168, 1110, 312))
-        placed = rounded_image(im, source, (120, 330, 1680, 560))
+        source = Image.open(path).convert("RGB")
+        layout = chapter.get("layout")
+        if layout == "preview":
+            # A neutral diagram establishes location; the enlarged preview is
+            # genuine screenshot pixels, not a reconstruction of the app.
+            d.rounded_rectangle((120, 288, 1800, 890), 28, fill="white", outline=(222, 229, 239), width=2)
+            d.rounded_rectangle((166, 334, 1050, 844), 20, fill=(245, 247, 251), outline=(216, 225, 239), width=2)
+            d.text((198, 360), "画面内の位置（説明図）", font=font(24), fill=MUTED)
+            rounded_image(im, source, (196, 556, 350, 250), radius=20)
+            d = ImageDraw.Draw(im)
+            d.line((580, 682, 1050, 682), fill=BLUE, width=3)
+            d.polygon(((1050, 682), (1033, 672), (1033, 692)), fill=BLUE)
+            d.text((684, 634), "拡大", font=font(27, True), fill=BLUE)
+            rounded_image(im, source, (1110, 375, 620, 443), radius=24)
+        elif layout == "autosave":
+            rounded_image(im, source, (120, 285, 1090, 605))
+            # Footer location is established by the real v1.3 editor frames.
+            actual_detail(im, source, (1260, 375, 540, 245), "画面下の保存状態を拡大", (0.765, 0.963, 0.845, 1.0))
+            d = ImageDraw.Draw(im)
+            label(d, "「完了」は押していません", (1260, 690), 26)
+        elif layout == "done":
+            rounded_image(im, source, (120, 285, 1090, 605))
+            actual_detail(im, source, (1260, 375, 540, 245), "画面右上の「完了」を拡大", (0.91, 0.05, 0.99, 0.115))
+            d = ImageDraw.Draw(im)
+            label(d, "編集を終えてプレビューへ", (1260, 690), 26)
+        elif layout == "quit":
+            rounded_image(im, source, (120, 285, 1090, 605))
+            d = ImageDraw.Draw(im)
+            d.rounded_rectangle((1260, 365, 1800, 735), 28, fill="white", outline=(222, 229, 239), width=2)
+            d.text((1310, 405), "終了操作の説明図", font=font(27, True), fill=BLUE)
+            d.text((1370, 485), "⌘ Q", font=font(88, True), fill=INK)
+            d.text((1300, 635), "HS Shot を終了", font=font(38, True), fill=INK)
+        else:
+            shown = crop_fraction(source, chapter["crop"]) if "crop" in chapter else source
+            placed = rounded_image(im, shown, (120, 285, 1680, 605))
+            if chapter["id"] == "editor":
+                d = ImageDraw.Draw(im)
+                callout(d, placed, (0.027, 0.216), "矢印ツール", (180, 385))
+                callout(d, placed, (0.027, 0.501), "文字ツール", (180, 570))
+                callout(d, placed, (0.89, 0.398), "色・太さを調整", (1490, 490))
         d = ImageDraw.Draw(im)
-        if chapter["id"] == "capture" and source.size == (1180, 800):
-            ui_callout(d, source.size, placed, (16, 158, 208, 198), "新規キャプチャ", (170, 408))
-        if chapter["id"] == "editor" and source.size == (1180, 822):
-            ui_callout(d, source.size, placed, (12, 160, 55, 195), "① 矢印", (190, 418))
-            ui_callout(d, source.size, placed, (12, 398, 55, 432), "② 文字", (190, 582))
-            ui_callout(d, source.size, placed, (959, 234, 1161, 365), "色・太さ", (1480, 493))
-        if chapter["id"] == "annotated" and source.size == (1180, 822):
-            ui_callout(d, source.size, placed, (12, 548, 55, 584), "切り抜き", (180, 690))
-        if chapter["id"] == "library-save" and source.size == (1180, 822):
-            ui_callout(d, source.size, placed, (1021, 53, 1158, 83), "ここで保存", (1450, 377))
-        if chapter["id"] == "permission":
-            text_center(d, "「設定を開く」→ HS Shot を許可 → アプリを再起動", 815, font(27, True), BLUE)
-        footnote = "範囲選択の操作を説明する図です" if chapter["id"] == "area" else "実際のアプリ画面を使用した操作ガイド"
-        d.text((140, 859), footnote, font=font(17), fill=MUTED)
-    elif chapter["id"] == "intro":
-        d.rounded_rectangle((120, 344, 1800, 880), 32, fill=(235, 241, 252))
-        text_center(d, "HS Shot", 420, font(108, True))
-        text_center(d, "スクリーンショットを、もっと手軽に。", 590, font(40), MUTED)
-        text_center(d, "macOS 14 以降  /  Apple Silicon・Intel 対応", 695, font(27), BLUE)
+        note = chapter.get("detail", "実際の HS Shot 1.3.0 の画面")
+        d.text((136, 901), note, font=font(17), fill=MUTED)
     else:
-        labels = [("1", "ダウンロード", "配布ページの PKG"), ("2", "インストール", "PKG を開いて進める"), ("3", "起動", "アプリケーションの HS Shot")]
-        for j, (n, title, desc) in enumerate(labels):
-            x = 120 + j * 570
-            d.rounded_rectangle((x, 360, x + 540, 830), 32, fill="white", outline=(222, 229, 239), width=2)
-            d.rounded_rectangle((x + 206, 410, x + 334, 538), 32, fill=(235, 241, 252))
-            d.text((x + 250, 433), n, font=font(58, True), fill=BLUE)
-            tw = d.textlength(title, font=font(35, True))
-            d.text((x + (540 - tw) / 2, 600), title, font=font(35, True), fill=INK)
-            tw = d.textlength(desc, font=font(23))
-            d.text((x + (540 - tw) / 2, 665), desc, font=font(23), fill=MUTED)
-        text_center(d, "署名・公証のない開発版です。インストール手順は配布ページで確認。", 854, font(21), MUTED)
+        diagram(im, chapter["id"])
+        d = ImageDraw.Draw(im)
 
-    d.rounded_rectangle((80, 930, 1840, 1022), 24, fill="white", outline=(219, 228, 240), width=2)
-    text_center(d, chapter["caption"], 955, font(31, True), INK, width=1660)
-    # A segmented progress strip is an orientation aid, not interactive UI.
+    d.rounded_rectangle((80, 946, 1840, 1025), 22, fill="white", outline=(219, 228, 240), width=2)
+    centered(d, chapter["caption"], 965, font(29, True), INK, width=1680)
     strip_w = 1740 / total
     for j in range(total):
-        d.rounded_rectangle((90 + j * strip_w, 1052, 90 + (j + 1) * strip_w - 7, 1058), 3, fill=BLUE if j <= index else (214, 223, 236))
+        d.rounded_rectangle((90 + j * strip_w, 1050, 90 + (j + 1) * strip_w - 7, 1057), 3, fill=BLUE if j <= index else (214, 223, 236))
     p = output or WORK / "cards" / f"{index:02d}-{chapter['id']}.png"
     p.parent.mkdir(parents=True, exist_ok=True)
     im.convert("RGB").save(p)
@@ -240,75 +279,115 @@ def stamp(seconds):
 
 
 def make_audio(chapter, rate):
-    p = WORK / "audio" / f"{chapter['id']}-{rate}.aiff"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    textfile = p.with_suffix(".txt")
-    old = textfile.read_text() if textfile.exists() else ""
-    if not p.exists() or old != chapter["speech"]:
-        textfile.write_text(chapter["speech"])
-        run(["say", "-v", "Kyoko", "-r", rate, "-f", textfile, "-o", p])
-    return p
+    folder = WORK / "audio" / chapter["id"]
+    folder.mkdir(parents=True, exist_ok=True)
+    parts = []
+    for i, speech in enumerate(chapter["speech"]):
+        audio = folder / f"{i:02d}-{rate}.aiff"
+        textfile = audio.with_suffix(".txt")
+        old = textfile.read_text() if textfile.exists() else ""
+        if not audio.exists() or old != speech:
+            textfile.write_text(speech)
+            run(["say", "-v", "Kyoko", "-r", rate, "-f", textfile, "-o", audio])
+        parts.append(dict(text=speech, audio=str(audio), duration=duration(audio)))
+    concat = folder / "concat.txt"
+    concat.write_text("".join(f"file '{p['audio']}'\n" for p in parts))
+    combined = folder / f"chapter-{rate}.aiff"
+    run([FFMPEG, "-y", "-v", "warning", "-f", "concat", "-safe", "0", "-i", concat, "-c:a", "pcm_s16be", combined])
+    return combined, parts
+
+
+def subtitle_lines(text, max_chars=34):
+    # Short sentence-level cues are aligned to separately synthesized speech.
+    lines = []
+    while len(text) > max_chars:
+        split = text.rfind("、", 12, max_chars + 1)
+        if split < 0:
+            split = max_chars - 1
+        lines.append(text[:split + 1])
+        text = text[split + 1:]
+    return "\n".join(lines + [text])
 
 
 def main():
+    global WORK, OUT
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio-only", action="store_true")
     parser.add_argument("--cards-only", action="store_true")
     parser.add_argument("--rate", type=int, default=220)
+    parser.add_argument("--work", type=Path, default=WORK)
+    parser.add_argument("--out", type=Path, default=OUT)
     args = parser.parse_args()
+    WORK, OUT = args.work.resolve(), args.out.resolve()
     WORK.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
     schedule = []
     cursor = 0.0
-    for i, chapter in enumerate(CHAPTERS):
-        audio = make_audio(chapter, args.rate)
-        # Speech starts after 0.35 seconds; the final still lingers for 0.65 seconds.
-        seconds = math.ceil((duration(audio) + 1.0) * FPS) / FPS
-        schedule.append(dict(**chapter, audio=str(audio), start=cursor, duration=seconds))
+    for chapter in CHAPTERS:
+        audio, speech_parts = make_audio(chapter, args.rate)
+        seconds = math.ceil((duration(audio) + 1.2) * FPS) / FPS
+        schedule.append(dict(**chapter, audio=str(audio), speech_parts=speech_parts, start=cursor, duration=seconds))
         cursor += seconds
     (WORK / "guide-timeline.json").write_text(json.dumps(schedule, ensure_ascii=False, indent=2))
-    print(json.dumps({"duration_seconds": cursor, "chapters": [{"id": c["id"], "seconds": c["duration"]} for c in schedule]}, ensure_ascii=False), flush=True)
+    print(json.dumps({"duration_seconds": cursor, "chapters": [{"id": c["id"], "start": c["start"], "seconds": c["duration"]} for c in schedule]}, ensure_ascii=False), flush=True)
     if args.audio_only:
         return
     segments = []
     for i, chapter in enumerate(schedule):
         still = render_still(chapter, i, len(schedule))
+        input_args = ["-loop", "1", "-framerate", FPS, "-i", still]
+        if chapter.get("sequence"):
+            # Display the actual input field, selected arrow, and moved endpoint
+            # in order. This is a clearly disclosed still-image sequence, not
+            # synthetic cursor motion or a claim of continuous screen capture.
+            first = 0.35 + chapter["speech_parts"][0]["duration"]
+            lengths = [first, 2.0, chapter["duration"] - first - 2.0]
+            sequence_files = []
+            for n, frame in enumerate(chapter["sequence"]):
+                p = WORK / "cards" / f"{i:02d}-{chapter['id']}-{n}.png"
+                render_still(dict(chapter, frame=frame), i, len(schedule), output=p)
+                sequence_files.append(p)
+            sequence_list = WORK / "cards" / f"{i:02d}-{chapter['id']}-sequence.txt"
+            sequence_list.write_text("".join(f"file '{p}'\nduration {seconds:.8f}\n" for p, seconds in zip(sequence_files, lengths)) + f"file '{sequence_files[-1]}'\n")
+            input_args = ["-f", "concat", "-safe", "0", "-i", sequence_list]
         if args.cards_only:
             continue
         segment = WORK / "segments" / f"{i:02}-{chapter['id']}.mp4"
         segment.parent.mkdir(parents=True, exist_ok=True)
-        input_args = ["-loop", "1", "-framerate", FPS, "-i", still]
-        if chapter["id"] == "area":
-            frames_dir = WORK / "area-animation"
-            frames_dir.mkdir(parents=True, exist_ok=True)
-            for frame_no in range(math.ceil(chapter["duration"] * 12)):
-                fraction = min(1.0, max(0.0, (frame_no / 12 - 0.5) / 2.0))
-                render_still(chapter, i, len(schedule), fraction, frames_dir / f"{frame_no:04d}.jpg")
-            input_args = ["-framerate", "12", "-i", frames_dir / "%04d.jpg"]
+        # Convert sparse still-sequence timestamps to FPS before fading, or the
+        # first black fade frame would be held until the next source image.
         run([FFMPEG, "-y", "-v", "warning", *input_args,
              "-i", chapter["audio"], "-t", chapter["duration"],
-             "-vf", f"fade=t=in:st=0:d=0.18,fade=t=out:st={chapter['duration'] - 0.18}:d=0.18,format=yuv420p",
-             "-af", "loudnorm=I=-18:TP=-2:LRA=7,adelay=350|350,apad", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-tune", "stillimage",
-             "-c:a", "aac", "-b:a", "96k", "-ar", "48000", "-ac", "2", "-r", FPS, "-movflags", "+faststart", segment])
+             "-vf", f"fps={FPS},fade=t=in:st=0:d=0.18,fade=t=out:st={chapter['duration'] - 0.18}:d=0.18,format=yuv420p",
+             "-af", "loudnorm=I=-18:TP=-2:LRA=7,adelay=350|350,apad", "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-tune", "stillimage",
+             "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2", "-r", FPS, "-movflags", "+faststart", segment])
         segments.append(segment)
         print(f"Rendered {i + 1}/{len(schedule)} {chapter['id']}", flush=True)
     if args.cards_only:
         return
     concat = WORK / "segments/concat.txt"
     concat.write_text("".join(f"file '{s}'\n" for s in segments))
-    video = OUT / "hs-shot-guide.mp4"
-    # Encode the audio once more across chapter boundaries to remove each AAC
-    # segment's priming samples and provide one continuous, monotonic timeline.
+    video = OUT / f"{BASENAME}.mp4"
+    # One final AAC encode removes per-segment priming samples and keeps A/V
+    # timestamps continuous across chapter boundaries.
     run([FFMPEG, "-y", "-v", "warning", "-f", "concat", "-safe", "0", "-i", concat,
-         "-c:v", "copy", "-c:a", "aac", "-b:a", "96k", "-af", "aresample=async=1:first_pts=0",
+         "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-af", "aresample=async=1:first_pts=0",
          "-movflags", "+faststart", video])
     vtt = "WEBVTT\n\n"
     for chapter in schedule:
-        vtt += f"{stamp(chapter['start'])} --> {stamp(chapter['start'] + chapter['duration'])}\n{chapter['title']}\n{chapter['caption']}\n\n"
-    (OUT / "hs-shot-guide.vtt").write_text(vtt)
-    (OUT / "hs-shot-guide-transcript.txt").write_text("HS Shot かんたんガイド\n実機の静止画と範囲選択の説明図に音声と字幕を付けた操作ガイドです。連続した画面録画ではありません。\n\n" + "\n\n".join(f"{c['title']}\n{c['speech']}" for c in schedule))
+        start = chapter["start"] + 0.35
+        for speech in chapter["speech_parts"]:
+            end = start + speech["duration"]
+            vtt += f"{stamp(start)} --> {stamp(end)}\n{subtitle_lines(speech['text'])}\n\n"
+            start = end
+    (OUT / f"{BASENAME}.vtt").write_text(vtt)
+    (OUT / f"{BASENAME}-transcript.txt").write_text(
+        "HS Shot 1.3.0 使い方ガイド\n"
+        "実際のアプリ画面の静止画と、終了・再起動などの説明図に、日本語音声と字幕を付けた動画です。連続した画面録画ではありません。\n"
+        "この例は通常のアプリ終了です。強制終了の場合は、最後に自動保存された状態から再開します。\n\n"
+        + "\n\n".join(f"[{stamp(c['start'])}] {c['title']}\n{' '.join(c['speech'])}" for c in schedule))
     poster = render_still(CHAPTERS[0], 0, len(CHAPTERS))
-    Image.open(poster).save(OUT / "guide-poster.jpg", quality=88, optimize=True)
+    Image.open(poster).save(OUT / f"guide-poster-v{VERSION}.jpg", quality=90, optimize=True)
     print(json.dumps({"video": str(video), "bytes": video.stat().st_size, "duration": duration(video)}, ensure_ascii=False), flush=True)
 
 

@@ -36,3 +36,5 @@ macOS専用の、CleanShotに近い撮影・編集・保存の流れを備えた
 - 配布ページ: https://hs-shot-download.kaiyamucun526.chatgpt.site 。公開URLによる閲覧はユーザー承認済み。PKG v1.0.1と約85秒の日本語音声・字幕付きガイドを掲載。公開ページ、MP4、VTT、GitHubのPKGを認証なしで取得し、動画・PKGのSHA-256一致を確認。390px・1440pxで横溢れなし、動画再生とFAQを確認。詳細は `docs/verification/2026-10-23-download-site.md`。
 
 - [x] v1.1.1: プレビューから編集→完了で戻る→再調整、実機確認、GitHub PKG・配布サイト更新。
+
+- [x] v1.2.0: 編集データの永続化。プレビュー閉鎖・アプリ再起動後の履歴再編集、76テスト・実機PNG保存、GitHub PKG・公開サイト更新、公開PKG照合。

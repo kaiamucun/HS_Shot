@@ -40,4 +40,14 @@ SHA-256: `51bde674c4974dda97ce9f92e897498d72f2876991389c29277a0fc3b27f8843`
 
 アプリはad-hoc署名。PKGはDeveloper ID署名・公証なし。IntelはUniversalビルド確認のみ、実機UIはApple Siliconで検証。
 
-公開結果は配布後に追記する。
+## 公開結果
+- ソース: `bacfcdb766bc793cd633fa2a1256ab8018917960` をGitHub mainへpush。
+- [GitHub Release v1.2.0](https://github.com/kaiamucun/HS_Shot/releases/tag/v1.2.0) にPKGとSHA-256ファイルを公開。
+- 認証なしで公開PKGを再取得し、ローカルの検証済みPKGと全バイト一致。
+- [既存公開サイト](https://hs-shot-download.kaiyamucun526.chatgpt.site) は公開範囲を維持し、保存版4をデプロイ。成功日時2026-10-24 12:05 JST。
+- Site source: `d7c2e0dc5406ca2b6a2dca64ca0c55457bdb3997`
+- Site version: `appgprj_6adb2dee401481918bc8f74d6cf2297a~appgver_7cd4c0cafac081918befe1fe8ac3aced`
+- Deployment: `appgdep_6adc205f7da081918a42bec26da4c4f0` / `succeeded`
+- 公開HTMLを認証なしで取得し、1.2.0の説明と3個のPKGリンクを確認。
+
+- 公開ページを実ブラウザで確認。800 px幅で横溢れなし、画像3点読込成功、動画readyState=4。更新説明の画面を `site-public.png` に記録。

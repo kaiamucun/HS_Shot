@@ -6,7 +6,7 @@ macOS専用のスクリーンショット・注釈アプリです。SwiftUI / Ap
 
 **[HS Shotの配布ページ](https://hs-shot-download.kaiyamucun526.chatgpt.site)** に、Mac版のダウンロード、インストールと画面収録権限の設定、操作ガイドをまとめています。アカウント登録なしで閲覧でき、社内でURLを共有できます。
 
-[最新版の操作ガイド](https://hs-shot-download.kaiyamucun526.chatgpt.site/#guide)は約2分12秒、日本語音声・字幕つきです。1.3.0の実画面で、途中の編集の自動保存 →「完了」を押さずアプリ終了 → 再起動 → 履歴から文字・矢印を再編集 → プレビューから画像を書き出す流れを説明しています。見たい場面に移動できる目次、MP4と台本のダウンロードも用意しています。実機の静止画と説明図で構成し、連続した画面録画ではありません。
+[最新版の操作ガイド](https://hs-shot-download.kaiyamucun526.chatgpt.site/#guide)は約2分6秒、日本語音声・字幕つきの実操作録画です。左下プレビューから編集し、途中の内容を自動保存 →「完了」を押さずアプリ終了 → 再起動 → 履歴から文字・矢印を再編集 → プレビューから画像を書き出す流れを収めています。クリック位置の表示と、見たい場面へ移動できる目次、MP4・台本のダウンロードを用意しています。
 
 ## 起動
 
@@ -94,7 +94,7 @@ SwiftPMプロジェクトなので `Package.swift` をXcodeで開いて開発で
 
 配布サイトは独立したSitesプロジェクトで管理し、親リポジトリでは `website/` をGitの対象外にしています。[公開・ダウンロード・動画再生の検証記録](docs/verification/2026-10-23-download-site.md)に、公開版の識別情報とファイル照合結果を記載しています。
 
-`scripts/render-guide.py` は、macOSの `say`（Kyoko）、Pillow、ffmpeg / ffprobeを使って操作ガイドを作成します。実機から用意した `.build/tutorial-v130/frames/` 内の画像など、ローカルの入力素材が必要です。これらの素材は配布リポジトリに含めていないため、リポジトリ単体では同じ動画を再生成できません。完成した動画・字幕・台本は配布サイトで公開しています。
+`scripts/record-guide.swift` はmacOS 15以降のScreenCaptureKitで実画面・ポインター・クリック位置を録画し、`scripts/render-live-guide.py` は実動画の必要な区間を等速で切り出し、日本語音声と字幕を付けます。macOSの `say`（Kyoko）、Pillow、ffmpeg / ffprobeが必要です。録画用の固定背景アプリ・架空サンプル・`.build/live-guide/take-02.mp4` などの入力素材は配布リポジトリには含めていません。完成した動画・字幕・台本は配布サイトで公開しています。旧静止画ガイド用の `scripts/render-guide.py` は履歴として残しています。
 
 ## 対応範囲
 
